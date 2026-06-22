@@ -4,9 +4,7 @@ import requests
 BASE_URL = "https://api.open-meteo.com/v1/forecast"
 GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
 
-DEFAULT_PARAMS = {
-    "latitude": 52.52,
-    "longitude": 13.41,
+_FORECAST_PARAMS = {
     "hourly": "temperature_2m,precipitation,windspeed_10m,winddirection_10m",
     "daily": "temperature_2m_max,temperature_2m_min,precipitation_sum,windspeed_10m_max,winddirection_10m_dominant",
     "timezone": "auto",
@@ -16,6 +14,10 @@ DEFAULT_PARAMS = {
 logger = logging.getLogger(__name__)
 
 
+class FetchError(Exception):
+    """Raised when an API request or response parsing fails."""
+
+
 def geocode_city(city: str) -> tuple[float, float, str]:
     logger.debug("Geocoding city: %r", city)
     try:
@@ -23,7 +25,7 @@ def geocode_city(city: str) -> tuple[float, float, str]:
         response.raise_for_status()
     except requests.exceptions.RequestException as e:
         logger.error("Geocoding request failed for %r: %s", city, e)
-        raise
+        raise FetchError(str(e)) from e
 
     results = response.json().get("results")
     if not results:
@@ -39,22 +41,22 @@ def geocode_city(city: str) -> tuple[float, float, str]:
     return lat, lon, label
 
 
-def fetch_weather(latitude: float = 52.52, longitude: float = 13.41) -> dict:
+def fetch_weather(latitude: float, longitude: float) -> dict:
     logger.debug("Fetching weather for lat=%s, lon=%s", latitude, longitude)
-    params = {**DEFAULT_PARAMS, "latitude": latitude, "longitude": longitude}
+    params = {**_FORECAST_PARAMS, "latitude": latitude, "longitude": longitude}
     try:
         response = requests.get(BASE_URL, params=params, timeout=10)
         response.raise_for_status()
     except requests.exceptions.RequestException as e:
         logger.error("Weather fetch failed for lat=%s, lon=%s: %s", latitude, longitude, e)
-        raise
+        raise FetchError(str(e)) from e
 
     data = response.json()
 
     # Validate top-level structure before returning so callers get a clear error
     # rather than a KeyError deep inside save_weather().
     if not data.get("hourly") or not data.get("daily"):
-        raise ValueError(f"Incomplete weather data in API response: missing hourly or daily fields")
+        raise ValueError("Incomplete weather data in API response: missing hourly or daily fields")
 
     logger.debug(
         "Received weather data: %d hourly entries, %d daily entries",
