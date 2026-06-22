@@ -17,8 +17,7 @@ poetry run streamlit run weather_dashboard/app.py
 | `weather_dashboard/fetch.py` | Open-Meteo forecast + geocoding API calls |
 | `weather_dashboard/storage.py` | Save/load CSV; upserts to avoid duplicates |
 | `weather_dashboard/app.py` | Streamlit UI — sidebar, metric cards, charts |
-| `data/hourly.csv` | Hourly temperature & precipitation (auto-created) |
-| `data/daily.csv` | Daily max/min temp & precipitation (auto-created) |
+| `data/weather.db` | SQLite database with `hourly` and `daily` tables (auto-created) |
 
 ## Architecture Notes
 
