@@ -2,17 +2,7 @@ import requests
 import streamlit as st
 from fetch import fetch_weather, geocode_city
 from storage import save_weather, load_hourly, load_daily
-
-
-def degrees_to_compass(degrees: float) -> str:
-    directions = [
-        ("N", "↓"), ("NNE", "↙"), ("NE", "↙"), ("ENE", "←"),
-        ("E", "←"), ("ESE", "←"), ("SE", "↖"), ("SSE", "↑"),
-        ("S", "↑"), ("SSW", "↗"), ("SW", "↗"), ("WSW", "→"),
-        ("W", "→"), ("WNW", "→"), ("NW", "↘"), ("NNW", "↓"),
-    ]
-    label, arrow = directions[round(degrees / 22.5) % 16]
-    return f"{arrow} {label}"
+from utils import degrees_to_compass
 
 st.set_page_config(page_title="Weather Dashboard", layout="wide")
 
