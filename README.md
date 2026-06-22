@@ -5,7 +5,8 @@ A simple 7-day weather forecast dashboard built with Streamlit, powered by the [
 ## Features
 
 - Search by city name
-- 7-day forecast for temperature (max/min) and precipitation
+- 7-day forecast for temperature (max/min), precipitation, and wind speed
+- Wind direction displayed as arrow + compass label (e.g. `→ W`)
 - Data persisted in a local SQLite database
 
 ## Setup
@@ -38,4 +39,11 @@ weather_dashboard/
 
 ## Data
 
-Fetched data is saved to `data/weather.db` (SQLite, auto-created on first run) in two tables: `hourly` and `daily`. Re-fetching the same location upserts existing rows rather than duplicating them.
+Fetched data is saved to `data/weather.db` (SQLite, auto-created on first run) in two tables:
+
+| Table | Columns |
+|-------|---------|
+| `hourly` | `time`, `temperature_2m`, `precipitation`, `wind_speed`, `wind_direction` |
+| `daily` | `date`, `temp_max`, `temp_min`, `precipitation_sum`, `wind_speed_max`, `wind_direction_dominant` |
+
+Re-fetching the same location upserts existing rows rather than duplicating them. Existing databases are migrated automatically to include the wind columns.
