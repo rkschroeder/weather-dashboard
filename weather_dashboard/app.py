@@ -2,6 +2,17 @@ import streamlit as st
 from fetch import fetch_weather, geocode_city
 from storage import save_weather, load_hourly, load_daily
 
+
+def degrees_to_compass(degrees: float) -> str:
+    directions = [
+        ("N", "↓"), ("NNE", "↙"), ("NE", "↙"), ("ENE", "←"),
+        ("E", "←"), ("ESE", "←"), ("SE", "↖"), ("SSE", "↑"),
+        ("S", "↑"), ("SSW", "↗"), ("SW", "↗"), ("WSW", "→"),
+        ("W", "→"), ("WNW", "→"), ("NW", "↘"), ("NNW", "↓"),
+    ]
+    label, arrow = directions[round(degrees / 22.5) % 16]
+    return f"{arrow} {label}"
+
 st.set_page_config(page_title="Weather Dashboard", layout="wide")
 
 with st.sidebar:
@@ -31,11 +42,12 @@ if daily.empty:
 
 today = daily.iloc[0]
 
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3, col4, col5 = st.columns(5)
 col1.metric("Max Temp Today", f"{today['temp_max']:.1f} °C")
 col2.metric("Min Temp Today", f"{today['temp_min']:.1f} °C")
 col3.metric("Precipitation Today", f"{today['precipitation_sum']:.1f} mm")
-col4.metric("Days of forecast", len(daily))
+col4.metric("Max Wind Today", f"{today['wind_speed_max']:.1f} km/h" if today['wind_speed_max'] is not None else "—")
+col5.metric("Wind Direction Today", degrees_to_compass(today['wind_direction_dominant']) if today['wind_direction_dominant'] is not None else "—")
 
 daily_chart = daily.set_index("date")[["temp_max", "temp_min"]].rename(
     columns={"temp_max": "Max °C", "temp_min": "Min °C"}
@@ -46,10 +58,20 @@ st.line_chart(daily_chart)
 st.subheader("Daily Precipitation Forecast (mm)")
 st.bar_chart(daily.set_index("date")["precipitation_sum"].rename("Precip mm"))
 
+st.subheader("Daily Wind Forecast")
+st.line_chart(daily.set_index("date")["wind_speed_max"].rename("Max Wind km/h"))
+
 st.subheader("Daily Summary")
-st.dataframe(daily.rename(columns={
+summary = daily.copy()
+summary["wind_compass"] = summary["wind_direction_dominant"].apply(
+    lambda d: degrees_to_compass(d) if d is not None else "—"
+)
+st.dataframe(summary.rename(columns={
     "date": "Date",
     "temp_max": "Max °C",
     "temp_min": "Min °C",
     "precipitation_sum": "Precip mm",
+    "wind_speed_max": "Max Wind km/h",
+    "wind_direction_dominant": "Wind Dir °",
+    "wind_compass": "Wind Dir",
 }), use_container_width=True)
