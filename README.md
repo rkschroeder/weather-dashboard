@@ -6,7 +6,7 @@ A simple 7-day weather forecast dashboard built with Streamlit, powered by the [
 
 - Search by city name
 - 7-day forecast for temperature (max/min) and precipitation
-- Data stored locally as CSV files
+- Data persisted in a local SQLite database
 
 ## Setup
 
@@ -29,13 +29,13 @@ Open `http://localhost:8501`, type a city name in the sidebar, and click **Fetch
 
 ```
 weather_dashboard/
-├── data/                  # CSV files (hourly.csv, daily.csv)
+├── data/                  # SQLite database (weather.db)
 └── weather_dashboard/
     ├── fetch.py           # Open-Meteo API + geocoding
-    ├── storage.py         # CSV read/write with deduplication
+    ├── storage.py         # SQLite read/write with upsert
     └── app.py             # Streamlit dashboard
 ```
 
 ## Data
 
-Fetched data is saved to `data/hourly.csv` and `data/daily.csv`. Re-fetching the same location updates existing rows rather than duplicating them.
+Fetched data is saved to `data/weather.db` (SQLite, auto-created on first run) in two tables: `hourly` and `daily`. Re-fetching the same location upserts existing rows rather than duplicating them.
