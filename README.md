@@ -1,6 +1,6 @@
 # Weather Dashboard
 
-A simple 7-day weather forecast dashboard built with Streamlit, powered by the [Open-Meteo](https://open-meteo.com/) API. No API key required.
+A 7-day weather forecast dashboard built with Streamlit, powered by the [Open-Meteo](https://open-meteo.com/) API. No API key required.
 
 ## Features
 
@@ -24,7 +24,17 @@ poetry install
 poetry run streamlit run weather_dashboard/app.py
 ```
 
-Open `http://localhost:8501`, type a city name in the sidebar, and click **Fetch & Refresh Data**.
+Open `http://localhost:8501`.
+
+## First Run
+
+When you open the app for the first time, no forecast data has been fetched yet. The dashboard will display a welcome screen with three steps to guide you:
+
+1. **Enter a city** — type any city name in the sidebar (default: *Berlin*).
+2. **Search the city** — click **Search City**. If multiple locations match, select the correct one from the list.
+3. **Fetch the forecast** — click **Fetch Weather** to load the 7-day forecast. Data is saved locally so subsequent loads are instant.
+
+After the first fetch the full dashboard appears: today's metrics (temperature, precipitation, wind), 7-day charts, and a daily summary table.
 
 ## Project Structure
 
