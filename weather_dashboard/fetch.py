@@ -18,10 +18,14 @@ class FetchError(Exception):
     """Raised when an API request or response parsing fails."""
 
 
-def geocode_city(city: str) -> tuple[float, float, str]:
+_MAX_GEOCODE_RESULTS = 15
+
+def geocode_city(city: str) -> list[dict]:
+    """Return up to 10 matching locations as dicts with keys: lat, lon, label."""
     logger.debug("Geocoding city: %r", city)
     try:
-        response = requests.get(GEOCODING_URL, params={"name": city, "count": 1, "language": "en"}, timeout=10)
+        # Request more than needed so we can filter out off-topic API fuzzy matches
+        response = requests.get(GEOCODING_URL, params={"name": city, "count": 50, "language": "en"}, timeout=10)
         response.raise_for_status()
     except requests.exceptions.RequestException as e:
         logger.error("Geocoding request failed for %r: %s", city, e)
@@ -31,14 +35,31 @@ def geocode_city(city: str) -> tuple[float, float, str]:
     if not results:
         raise ValueError(f"City not found: {city!r}")
 
-    try:
-        r = results[0]
-        lat, lon, label = r["latitude"], r["longitude"], f"{r['name']}, {r.get('country', '')}"
-    except KeyError as e:
-        raise ValueError(f"Unexpected geocoding response structure: missing field {e}") from e
+    city_lower = city.strip().lower()
+    locations = []
+    for r in results:
+        try:
+            name = r["name"]
+            # Skip results whose city name doesn't contain the search term
+            # (the API can return fuzzy/alias matches unrelated to the query)
+            if city_lower not in name.lower():
+                continue
+            parts = [name]
+            if r.get("admin1"):
+                parts.append(r["admin1"])
+            parts.append(r.get("country", ""))
+            label = ", ".join(p for p in parts if p)
+            locations.append({"lat": r["latitude"], "lon": r["longitude"], "label": label})
+        except KeyError as e:
+            logger.warning("Skipping geocoding result with missing field %s: %r", e, r)
+        if len(locations) == _MAX_GEOCODE_RESULTS:
+            break
 
-    logger.debug("Geocoded %r → %s (%s, %s)", city, label, lat, lon)
-    return lat, lon, label
+    if not locations:
+        raise ValueError(f"City not found: {city!r}")
+
+    logger.debug("Geocoded %r → %d result(s)", city, len(locations))
+    return locations
 
 
 def fetch_weather(latitude: float, longitude: float) -> dict:

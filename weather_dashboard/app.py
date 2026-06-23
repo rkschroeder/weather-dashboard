@@ -8,22 +8,39 @@ st.set_page_config(page_title="Weather Dashboard", layout="wide")
 with st.sidebar:
     st.header("Location")
     city = st.text_input("City name", value="Berlin")
-    if st.button("Fetch & Refresh Data"):
+
+    # Clear cached results whenever the city input changes
+    if st.session_state.get("_prev_city") != city:
+        st.session_state.pop("geo_results", None)
+        st.session_state["_prev_city"] = city
+
+    if st.button("Search City"):
         with st.spinner("Looking up city..."):
             try:
-                lat, lon, label = geocode_city(city)
-                st.caption(f"Found: {label} ({lat:.4f}, {lon:.4f})")
+                st.session_state.geo_results = geocode_city(city)
             except (ValueError, FetchError) as e:
                 st.error(str(e))
                 st.stop()
-        with st.spinner("Fetching weather..."):
-            try:
-                data = fetch_weather(lat, lon)
-                save_weather(data)
-            except (ValueError, FetchError) as e:
-                st.error(str(e))
-                st.stop()
-        st.success(f"Data updated for {label}.")
+
+    if "geo_results" in st.session_state:
+        results = st.session_state.geo_results
+        if len(results) == 1:
+            selected = results[0]
+            st.caption(f"Found: {selected['label']} ({selected['lat']:.4f}, {selected['lon']:.4f})")
+        else:
+            labels = [r["label"] for r in results]
+            choice = st.radio(f"{len(results)} matches found — select one:", labels)
+            selected = results[labels.index(choice)]
+
+        if st.button("Fetch Weather"):
+            with st.spinner("Fetching weather..."):
+                try:
+                    data = fetch_weather(selected["lat"], selected["lon"])
+                    save_weather(data)
+                except (ValueError, FetchError) as e:
+                    st.error(str(e))
+                    st.stop()
+            st.success(f"Data updated for {selected['label']}.")
 
 st.title(f"7-Day Weather Forecast — {city}")
 
