@@ -73,11 +73,19 @@ def load_hourly() -> pd.DataFrame:
     if not DB_PATH.exists():
         return pd.DataFrame(columns=["time", "temperature_2m", "precipitation", "wind_speed", "wind_direction"])
     with closing(_connect()) as conn:
-        return pd.read_sql("SELECT * FROM hourly ORDER BY time", conn, parse_dates=["time"])
+        return pd.read_sql(
+            "SELECT * FROM hourly WHERE time >= date('now', 'localtime') ORDER BY time",
+            conn,
+            parse_dates=["time"],
+        )
 
 
 def load_daily() -> pd.DataFrame:
     if not DB_PATH.exists():
         return pd.DataFrame(columns=["date", "temp_max", "temp_min", "precipitation_sum", "wind_speed_max", "wind_direction_dominant"])
     with closing(_connect()) as conn:
-        return pd.read_sql("SELECT * FROM daily ORDER BY date", conn, parse_dates=["date"])
+        return pd.read_sql(
+            "SELECT * FROM daily WHERE date >= date('now', 'localtime') ORDER BY date",
+            conn,
+            parse_dates=["date"],
+        )
