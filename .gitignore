@@ -11,8 +11,9 @@ build/
 # Data files (fetched at runtime)
 data/
 
-# Streamlit
-.streamlit/
+# Streamlit (ignore secrets but allow theme config)
+.streamlit/*
+!.streamlit/config.toml
 
 # OS
 .DS_Store
