@@ -20,11 +20,11 @@ class FetchError(Exception):
 
 _MAX_GEOCODE_RESULTS = 15
 
+
 def geocode_city(city: str) -> list[dict]:
-    """Return up to 10 matching locations as dicts with keys: lat, lon, label."""
+    """Return up to 15 matching locations as dicts with keys: lat, lon, label."""
     logger.debug("Geocoding city: %r", city)
     try:
-        # Request more than needed so we can filter out off-topic API fuzzy matches
         response = requests.get(GEOCODING_URL, params={"name": city, "count": 50, "language": "en"}, timeout=10)
         response.raise_for_status()
     except requests.exceptions.RequestException as e:
@@ -74,8 +74,6 @@ def fetch_weather(latitude: float, longitude: float) -> dict:
 
     data = response.json()
 
-    # Validate top-level structure before returning so callers get a clear error
-    # rather than a KeyError deep inside save_weather().
     if not data.get("hourly") or not data.get("daily"):
         raise ValueError("Incomplete weather data in API response: missing hourly or daily fields")
 

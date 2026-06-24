@@ -36,15 +36,33 @@ When you open the app for the first time, no forecast data has been fetched yet.
 
 After the first fetch the full dashboard appears: today's metrics (temperature, precipitation, wind), 7-day charts, and a daily summary table.
 
+## Run the pipeline from the terminal
+
+`run_pipeline.py` is a developer convenience script for running and verifying the pipeline without opening the Streamlit app. Pass any city name as an argument:
+
+```bash
+poetry run python run_pipeline.py Berlin
+poetry run python run_pipeline.py "New York"
+```
+
+It geocodes the city, runs the full ETL pipeline, and prints the resulting 7-day forecast to the terminal.
+
 ## Project Structure
 
 ```
 weather_dashboard/
-├── data/                  # SQLite database (weather.db)
+├── run_pipeline.py            # CLI script — run the pipeline from the terminal
+├── data/                      # SQLite database (weather.db, auto-created)
 └── weather_dashboard/
-    ├── fetch.py           # Open-Meteo API + geocoding
-    ├── storage.py         # SQLite read/write with upsert
-    └── app.py             # Streamlit dashboard
+    ├── pipeline/
+    │   ├── __init__.py        # run_pipeline(lat, lon) — orchestrates ETL
+    │   ├── extract.py         # Open-Meteo API + geocoding (Extract)
+    │   ├── transform.py       # Parse raw JSON → row tuples (Transform)
+    │   └── load.py            # Upsert rows into SQLite (Load)
+    ├── db.py                  # DB connection + schema init
+    ├── query.py               # Read DataFrames from SQLite
+    ├── utils.py               # Helper: degrees_to_compass
+    └── app.py                 # Streamlit dashboard
 ```
 
 ## Data

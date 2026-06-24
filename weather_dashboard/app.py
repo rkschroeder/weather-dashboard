@@ -1,8 +1,9 @@
 import altair as alt
 import streamlit as st
-from fetch import fetch_weather, geocode_city, FetchError
-from storage import save_weather, load_hourly, load_daily
-from utils import degrees_to_compass
+from weather_dashboard.pipeline.extract import geocode_city
+from weather_dashboard.pipeline import run_pipeline, FetchError
+from weather_dashboard.query import load_hourly, load_daily, load_location_label
+from weather_dashboard.utils import degrees_to_compass
 
 st.set_page_config(
     page_title="Weather Dashboard",
@@ -78,8 +79,7 @@ with st.sidebar:
         if st.button("⬇️ Fetch Weather", use_container_width=True, type="primary"):
             with st.spinner("Fetching weather data..."):
                 try:
-                    data = fetch_weather(selected["lat"], selected["lon"])
-                    save_weather(data)
+                    run_pipeline(selected["lat"], selected["lon"], label=selected["label"])
                 except (ValueError, FetchError) as e:
                     st.error(str(e))
                     st.stop()
@@ -138,7 +138,8 @@ if daily.empty:
         """, unsafe_allow_html=True)
     st.stop()
 
-st.caption(f"Showing forecast for **{city}**")
+location_label = load_location_label() or city
+st.caption(f"Showing forecast for **{location_label}**")
 st.divider()
 
 # ── Today's metrics ───────────────────────────────────────────────────────────
