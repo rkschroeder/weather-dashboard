@@ -38,14 +38,14 @@ After the first fetch the full dashboard appears: today's metrics (temperature, 
 
 ## Run the pipeline from the terminal
 
-You can fetch weather data for any city directly from the terminal, without opening the app:
+`run_pipeline.py` is a developer convenience script for running and verifying the pipeline without opening the Streamlit app. Pass any city name as an argument:
 
 ```bash
 poetry run python run_pipeline.py Berlin
 poetry run python run_pipeline.py "New York"
 ```
 
-This geocodes the city, runs the full ETL pipeline, and prints the 7-day forecast to the terminal.
+It geocodes the city, runs the full ETL pipeline, and prints the resulting 7-day forecast to the terminal.
 
 ## Project Structure
 

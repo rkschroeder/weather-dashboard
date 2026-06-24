@@ -19,7 +19,7 @@ poetry run python run_pipeline.py
 
 | File | Purpose |
 |------|---------|
-| `run_pipeline.py` | CLI script — geocode city, run ETL, print forecast |
+| `run_pipeline.py` | Developer convenience script — verify the pipeline from the terminal without opening the app |
 | `weather_dashboard/pipeline/extract.py` | Open-Meteo forecast + geocoding API calls |
 | `weather_dashboard/pipeline/transform.py` | Parse raw API JSON → typed row tuples |
 | `weather_dashboard/pipeline/load.py` | Upsert rows into SQLite |
