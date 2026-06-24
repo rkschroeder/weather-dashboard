@@ -1,9 +1,13 @@
+import os
 import sqlite3
 from contextlib import closing
 from pathlib import Path
 
-DATA_DIR = Path(__file__).parent.parent / "data"
-DB_PATH = DATA_DIR / "weather.db"
+_DEFAULT_DB_PATH = Path(__file__).parent.parent / "data" / "weather.db"
+DB_PATH = Path(os.environ.get("WEATHER_DB_PATH", _DEFAULT_DB_PATH))
+DATA_DIR = DB_PATH.parent
+
+_db_ready = False
 
 
 def connect() -> sqlite3.Connection:
@@ -11,6 +15,9 @@ def connect() -> sqlite3.Connection:
 
 
 def init_db() -> None:
+    global _db_ready
+    if _db_ready:
+        return
     DATA_DIR.mkdir(exist_ok=True)
     with closing(connect()) as conn:
         with conn:
@@ -33,3 +40,10 @@ def init_db() -> None:
                     wind_direction_dominant REAL
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS metadata (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                )
+            """)
+    _db_ready = True
