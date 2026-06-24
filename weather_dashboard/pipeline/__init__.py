@@ -1,0 +1,17 @@
+import logging
+from weather_dashboard.pipeline.extract import fetch_weather, FetchError
+from weather_dashboard.pipeline.transform import parse_weather
+from weather_dashboard.pipeline.load import upsert_weather
+
+logger = logging.getLogger(__name__)
+
+
+def run_pipeline(latitude: float, longitude: float) -> None:
+    """Extract → Transform → Load for one location. Safe to call from Airflow or CLI."""
+    logger.info("Pipeline start: lat=%s, lon=%s", latitude, longitude)
+
+    raw = fetch_weather(latitude, longitude)
+    hourly_rows, daily_rows = parse_weather(raw)
+    upsert_weather(hourly_rows, daily_rows)
+
+    logger.info("Pipeline complete: %d hourly, %d daily rows upserted", len(hourly_rows), len(daily_rows))
