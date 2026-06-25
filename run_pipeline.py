@@ -4,7 +4,7 @@ logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 from weather_dashboard.pipeline.extract import geocode_city
 from weather_dashboard.pipeline import run_pipeline
-from weather_dashboard.query import load_daily
+from weather_dashboard.query import load_daily, load_hourly
 
 city = sys.argv[1] if len(sys.argv) > 1 else "Berlin"
 
@@ -23,4 +23,20 @@ print(f"Location: {loc['label']} ({loc['lat']}, {loc['lon']})")
 run_pipeline(loc["lat"], loc["lon"], label=loc["label"])
 
 print("\n--- Daily forecast ---")
-print(load_daily()[["date", "temp_max", "temp_min", "precipitation_sum", "wind_speed_max", "wind_direction_dominant"]].to_string(index=False))
+daily = load_daily()
+hourly = load_hourly()
+
+if "humidity" in hourly.columns:
+    humidity_daily = (
+        hourly.assign(date=hourly["time"].dt.normalize())
+        .groupby("date", as_index=False)["humidity"]
+        .mean()
+        .rename(columns={"humidity": "avg_humidity"})
+    )
+    daily = daily.merge(humidity_daily, on="date", how="left")
+    daily["avg_humidity"] = daily["avg_humidity"].round(0).astype("Int64")
+
+cols = ["date", "temp_max", "temp_min", "precipitation_sum", "wind_speed_max", "wind_direction_dominant"]
+if "avg_humidity" in daily.columns:
+    cols.append("avg_humidity")
+print(daily[cols].to_string(index=False))

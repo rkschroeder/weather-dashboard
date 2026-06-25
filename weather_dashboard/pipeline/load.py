@@ -6,7 +6,7 @@ def upsert_weather(hourly_rows: list[tuple], daily_rows: list[tuple], label: str
     with closing(connect()) as conn:
         with conn:
             conn.executemany(
-                "INSERT OR REPLACE INTO hourly (time, temperature_2m, precipitation, wind_speed, wind_direction) VALUES (?, ?, ?, ?, ?)",
+                "INSERT OR REPLACE INTO hourly (time, temperature_2m, precipitation, wind_speed, wind_direction, humidity) VALUES (?, ?, ?, ?, ?, ?)",
                 hourly_rows,
             )
             conn.executemany(

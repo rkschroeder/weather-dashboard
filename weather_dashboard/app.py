@@ -1,4 +1,5 @@
 import altair as alt
+import pandas as pd
 import streamlit as st
 from weather_dashboard.pipeline.extract import geocode_city
 from weather_dashboard.pipeline import run_pipeline, FetchError
@@ -145,13 +146,21 @@ st.divider()
 # ── Today's metrics ───────────────────────────────────────────────────────────
 today = daily.iloc[0]
 
+today_date = pd.Timestamp.now().normalize()
+current_humidity = None
+if not hourly.empty and "humidity" in hourly.columns:
+    today_hourly = hourly[hourly["time"].dt.normalize() == today_date]
+    if not today_hourly.empty:
+        current_humidity = today_hourly["humidity"].mean()
+
 st.subheader("Today at a Glance")
-col1, col2, col3, col4, col5 = st.columns(5)
+col1, col2, col3, col4, col5, col6 = st.columns(6)
 col1.metric("🌡️ Max Temp (°C)", f"{today['temp_max']:.1f}")
 col2.metric("❄️ Min Temp (°C)", f"{today['temp_min']:.1f}")
 col3.metric("🌧️ Precipitation (mm)", f"{today['precipitation_sum']:.1f}")
 col4.metric("💨 Wind Speed (km/h)", f"{today['wind_speed_max']:.1f}" if today["wind_speed_max"] is not None else "—")
 col5.metric("🧭 Wind Direction", degrees_to_compass(today["wind_direction_dominant"]) if today["wind_direction_dominant"] is not None else "—")
+col6.metric("💧 Avg Humidity (%)", f"{current_humidity:.0f}" if current_humidity is not None else "—")
 
 st.divider()
 
@@ -208,6 +217,24 @@ wind_chart = (
 st.subheader("💨 Wind Speed Forecast (km/h)")
 st.altair_chart(wind_chart, use_container_width=True)
 
+if "humidity" in hourly.columns:
+    humidity_avg = (
+        hourly.assign(date=hourly["time"].dt.normalize())
+        .groupby("date", as_index=False)["humidity"]
+        .mean()
+    )
+    humidity_chart = (
+        alt.Chart(humidity_avg)
+        .mark_line()
+        .encode(
+            x=alt.X("date:T", axis=date_axis),
+            y=alt.Y("humidity:Q", title="%", scale=alt.Scale(domain=[0, 100])),
+        )
+        .properties(height=300)
+    )
+    st.subheader("💧 Humidity Forecast (%)")
+    st.altair_chart(humidity_chart, use_container_width=True)
+
 st.divider()
 
 # ── Summary table ─────────────────────────────────────────────────────────────
@@ -216,16 +243,29 @@ summary = daily.copy()
 summary["wind_compass"] = summary["wind_direction_dominant"].apply(
     lambda d: degrees_to_compass(d) if d is not None else "—"
 )
+if "humidity" in hourly.columns:
+    humidity_daily = (
+        hourly.assign(date=hourly["time"].dt.normalize())
+        .groupby("date", as_index=False)["humidity"]
+        .mean()
+    )
+    summary = summary.merge(humidity_daily, on="date", how="left")
+    summary["humidity"] = summary["humidity"].apply(
+        lambda v: f"{v:.0f}" if pd.notna(v) else "—"
+    )
 summary["date"] = summary["date"].dt.strftime("%a %d")
+rename_map = {
+    "date": "Date",
+    "temp_max": "Max Temp (°C)",
+    "temp_min": "Min Temp (°C)",
+    "precipitation_sum": "Precipitation (mm)",
+    "wind_speed_max": "Wind Speed (km/h)",
+    "wind_compass": "Wind Dir",
+}
+if "humidity" in summary.columns:
+    rename_map["humidity"] = "Avg Humidity (%)"
 st.dataframe(
-    summary.drop(columns=["wind_direction_dominant"]).rename(columns={
-        "date": "Date",
-        "temp_max": "Max Temp (°C)",
-        "temp_min": "Min Temp (°C)",
-        "precipitation_sum": "Precipitation (mm)",
-        "wind_speed_max": "Wind Speed (km/h)",
-        "wind_compass": "Wind Dir",
-    }),
+    summary.drop(columns=["wind_direction_dominant"]).rename(columns=rename_map),
     use_container_width=True,
     hide_index=True,
 )
