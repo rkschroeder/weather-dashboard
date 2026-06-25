@@ -28,12 +28,15 @@ def init_db() -> None:
                     precipitation REAL,
                     wind_speed REAL,
                     wind_direction REAL,
-                    humidity REAL
+                    humidity REAL,
+                    uv_index REAL
                 )
             """)
             existing = {col[1] for col in conn.execute("PRAGMA table_info(hourly)").fetchall()}
             if "humidity" not in existing:
                 conn.execute("ALTER TABLE hourly ADD COLUMN humidity REAL")
+            if "uv_index" not in existing:
+                conn.execute("ALTER TABLE hourly ADD COLUMN uv_index REAL")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS daily (
                     date TEXT PRIMARY KEY,
