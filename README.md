@@ -5,8 +5,8 @@ A 7-day weather forecast dashboard built with Streamlit, powered by the [Open-Me
 ## Features
 
 - Search by city name
-- 7-day forecast for temperature (max/min), precipitation, wind speed, humidity, and UV index
-- Current humidity and UV index displayed as live metric cards
+- 7-day forecast for temperature (max/min), precipitation, wind speed, humidity, UV index, sunrise, and sunset
+- Today's metrics displayed as live cards: temperature, precipitation, wind, humidity, UV index, sunrise, and sunset
 - Wind direction displayed as arrow compass label (e.g. `→ W`)
 - Data persisted in a local SQLite database
 
@@ -35,7 +35,7 @@ When you open the app for the first time, no forecast data has been fetched yet.
 2. **Search the city** — click **Search City**. If multiple locations match, select the correct one from the list.
 3. **Fetch the forecast** — click **Fetch Weather** to load the 7-day forecast. Data is saved locally so subsequent loads are instant.
 
-After the first fetch the full dashboard appears: today's metric cards (max/min temperature, precipitation, wind speed, wind direction, current humidity, and UV index), 7-day forecast charts (temperature, precipitation, wind speed, humidity, UV index), and a daily summary table.
+After the first fetch the full dashboard appears: today's metric cards (max/min temperature, precipitation, wind speed, wind direction, humidity, UV index, sunrise, and sunset), 7-day forecast charts (temperature, precipitation, wind speed, humidity, UV index), and a daily summary table.
 
 ## Run the pipeline from the terminal
 
@@ -72,7 +72,7 @@ Fetched data is saved to `data/weather.db` (SQLite, auto-created on first run) i
 
 | Table | Columns |
 |-------|---------|
-| `hourly` | `time`, `temperature_2m`, `precipitation`, `wind_speed`, `wind_direction`, `humidity` |
-| `daily` | `date`, `temp_max`, `temp_min`, `precipitation_sum`, `wind_speed_max`, `wind_direction_dominant`, `uv_index` |
+| `hourly` | `time`, `temperature_2m`, `precipitation`, `wind_speed`, `wind_direction`, `humidity`, `uv_index` |
+| `daily` | `date`, `temp_max`, `temp_min`, `precipitation_sum`, `wind_speed_max`, `wind_direction_dominant`, `sunrise`, `sunset` |
 
 Re-fetching the same location upserts existing rows rather than duplicating them. Existing databases are migrated automatically to add any missing columns.

@@ -44,9 +44,16 @@ def init_db() -> None:
                     temp_min REAL,
                     precipitation_sum REAL,
                     wind_speed_max REAL,
-                    wind_direction_dominant REAL
+                    wind_direction_dominant REAL,
+                    sunrise TEXT,
+                    sunset TEXT
                 )
             """)
+            daily_existing = {col[1] for col in conn.execute("PRAGMA table_info(daily)").fetchall()}
+            if "sunrise" not in daily_existing:
+                conn.execute("ALTER TABLE daily ADD COLUMN sunrise TEXT")
+            if "sunset" not in daily_existing:
+                conn.execute("ALTER TABLE daily ADD COLUMN sunset TEXT")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS metadata (
                     key TEXT PRIMARY KEY,

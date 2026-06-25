@@ -26,17 +26,17 @@ poetry run python run_pipeline.py Berlin
 | `weather_dashboard/db.py` | DB connection + schema init |
 | `weather_dashboard/query.py` | `load_hourly()` / `load_daily()` — read DataFrames from DB |
 | `weather_dashboard/app.py` | Streamlit UI — sidebar, metric cards, charts |
-| `data/weather.db` | SQLite database with `hourly` (includes `humidity`) and `daily` (includes `uv_index`) tables (auto-created) |
+| `data/weather.db` | SQLite database with `hourly` and `daily` tables (auto-created) |
 
 ## Architecture Notes
 
 - `geocode_city(city)` → converts a city name to geographic coordinates. Returns up to 15 `{lat, lon, label}` dicts via the Open-Meteo geocoding API. Called in two places: the app sidebar (Search City button, so the user can pick the right match when multiple locations share a name) and `run_pipeline.py` (CLI, before passing coordinates to the pipeline).
-- `fetch_weather(lat, lon)` → returns raw JSON with `hourly` and `daily` keys; hourly fields include `temperature_2m`, `precipitation`, `windspeed_10m`, `winddirection_10m`, `relativehumidity_2m`; daily fields include `uv_index_max`
+- `fetch_weather(lat, lon)` → returns raw JSON with `hourly` and `daily` keys; hourly fields include `temperature_2m`, `precipitation`, `windspeed_10m`, `winddirection_10m`, `relativehumidity_2m`; daily fields include `uv_index_max`, `sunrise`, `sunset`
 - `parse_weather(data)` → transforms raw JSON into `(hourly_rows, daily_rows)` tuples
 - `upsert_weather(hourly_rows, daily_rows)` → writes to SQLite with INSERT OR REPLACE
 - `run_pipeline(lat, lon)` → single entry point for the full ETL; callable from Airflow or CLI
 - Streamlit reruns the full script on every interaction; SQLite is the persistence layer
-- `init_db()` runs a migration guard on startup: adds any missing columns (e.g. `humidity`) to existing tables via `ALTER TABLE` so older databases are upgraded automatically
+- `init_db()` runs a migration guard on startup: adds any missing columns to existing tables via `ALTER TABLE` so older databases are upgraded automatically
 
 ## Dependencies
 

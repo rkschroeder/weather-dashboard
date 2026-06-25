@@ -17,6 +17,8 @@ def parse_weather(data: dict) -> tuple[list[tuple], list[tuple]]:
             data["daily"]["precipitation_sum"],
             data["daily"]["windspeed_10m_max"],
             data["daily"]["winddirection_10m_dominant"],
+            data["daily"]["sunrise"],
+            data["daily"]["sunset"],
         ))
     except KeyError as e:
         raise ValueError(f"Unexpected weather data structure: missing field {e}") from e
