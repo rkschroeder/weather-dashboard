@@ -31,7 +31,7 @@ poetry run python run_pipeline.py Berlin
 ## Architecture Notes
 
 - `geocode_city(city)` → converts a city name to geographic coordinates. Returns up to 15 `{lat, lon, label}` dicts via the Open-Meteo geocoding API. Called in two places: the app sidebar (Search City button, so the user can pick the right match when multiple locations share a name) and `run_pipeline.py` (CLI, before passing coordinates to the pipeline).
-- `fetch_weather(lat, lon)` → returns raw JSON with `hourly` and `daily` keys; hourly fields include `temperature_2m`, `precipitation`, `windspeed_10m`, `winddirection_10m`, `relativehumidity_2m`; daily fields include `uv_index_max`, `sunrise`, `sunset`
+- `fetch_weather(lat, lon)` → returns raw JSON with `hourly` and `daily` keys; hourly fields include `temperature_2m`, `precipitation`, `windspeed_10m`, `winddirection_10m`, `relativehumidity_2m`, `cloudcover`; daily fields include `uv_index_max`, `sunrise`, `sunset`
 - `parse_weather(data)` → transforms raw JSON into `(hourly_rows, daily_rows)` tuples
 - `upsert_weather(hourly_rows, daily_rows)` → writes to SQLite with INSERT OR REPLACE
 - `run_pipeline(lat, lon)` → single entry point for the full ETL; callable from Airflow or CLI

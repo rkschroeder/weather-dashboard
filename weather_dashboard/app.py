@@ -159,8 +159,14 @@ if not hourly.empty and "uv_index" in hourly.columns:
     if not today_hourly_uv.empty:
         current_uv = today_hourly_uv["uv_index"].max()
 
+current_cloud_cover = None
+if not hourly.empty and "cloud_cover" in hourly.columns:
+    today_hourly_cc = hourly[hourly["time"].dt.normalize() == today_date]
+    if not today_hourly_cc.empty:
+        current_cloud_cover = today_hourly_cc["cloud_cover"].mean()
+
 st.subheader("Today at a Glance")
-col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
+col1, col2, col3, col4, col5, col6, col7, col8 = st.columns(8)
 col1.metric("🌡️ Max Temp (°C)", f"{today['temp_max']:.1f}")
 col2.metric("❄️ Min Temp (°C)", f"{today['temp_min']:.1f}")
 col3.metric("🌧️ Precipitation (mm)", f"{today['precipitation_sum']:.1f}")
@@ -168,6 +174,7 @@ col4.metric("💨 Wind Speed (km/h)", f"{today['wind_speed_max']:.1f}" if today[
 col5.metric("🧭 Wind Direction", degrees_to_compass(today["wind_direction_dominant"]) if today["wind_direction_dominant"] is not None else "—")
 col6.metric("💧 Avg Humidity (%)", f"{current_humidity:.0f}" if current_humidity is not None else "—")
 col7.metric("☀️ Peak UV Index", f"{current_uv:.1f}" if current_uv is not None else "—")
+col8.metric("☁️ Avg Cloud Cover (%)", f"{current_cloud_cover:.0f}" if current_cloud_cover is not None else "—")
 
 if "sunrise" in today.index and pd.notna(today["sunrise"]):
     col_sr, col_ss = st.columns(2)
@@ -265,6 +272,24 @@ if "uv_index" in hourly.columns:
     st.subheader("☀️ Peak UV Index Forecast")
     st.altair_chart(uv_chart, use_container_width=True)
 
+if "cloud_cover" in hourly.columns:
+    cloud_daily = (
+        hourly.assign(date=hourly["time"].dt.normalize())
+        .groupby("date", as_index=False)["cloud_cover"]
+        .mean()
+    )
+    cloud_chart = (
+        alt.Chart(cloud_daily)
+        .mark_area(opacity=0.5)
+        .encode(
+            x=alt.X("date:T", axis=date_axis),
+            y=alt.Y("cloud_cover:Q", title="%", scale=alt.Scale(domain=[0, 100])),
+        )
+        .properties(height=300)
+    )
+    st.subheader("☁️ Cloud Cover Forecast (%)")
+    st.altair_chart(cloud_chart, use_container_width=True)
+
 st.divider()
 
 # ── Summary table ─────────────────────────────────────────────────────────────
@@ -294,6 +319,17 @@ if "uv_index" in hourly.columns:
     summary["peak_uv"] = summary["peak_uv"].apply(
         lambda v: f"{v:.1f}" if pd.notna(v) else "—"
     )
+if "cloud_cover" in hourly.columns:
+    cloud_daily_summary = (
+        hourly.assign(date=hourly["time"].dt.normalize())
+        .groupby("date", as_index=False)["cloud_cover"]
+        .mean()
+        .rename(columns={"cloud_cover": "avg_cloud_cover"})
+    )
+    summary = summary.merge(cloud_daily_summary, on="date", how="left")
+    summary["avg_cloud_cover"] = summary["avg_cloud_cover"].apply(
+        lambda v: f"{v:.0f}" if pd.notna(v) else "—"
+    )
 if "sunrise" in daily.columns:
     summary["sunrise"] = summary["sunrise"].apply(
         lambda v: v[11:16] if isinstance(v, str) and len(v) >= 16 else "—"
@@ -315,6 +351,8 @@ if "humidity" in summary.columns:
     rename_map["humidity"] = "Avg Humidity (%)"
 if "peak_uv" in summary.columns:
     rename_map["peak_uv"] = "Peak UV Index"
+if "avg_cloud_cover" in summary.columns:
+    rename_map["avg_cloud_cover"] = "Avg Cloud Cover (%)"
 if "sunrise" in summary.columns:
     rename_map["sunrise"] = "Sunrise"
 if "sunset" in summary.columns:
