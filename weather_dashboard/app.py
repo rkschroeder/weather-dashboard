@@ -153,14 +153,21 @@ if not hourly.empty and "humidity" in hourly.columns:
     if not today_hourly.empty:
         current_humidity = today_hourly["humidity"].mean()
 
+current_uv = None
+if not hourly.empty and "uv_index" in hourly.columns:
+    today_hourly_uv = hourly[hourly["time"].dt.normalize() == today_date]
+    if not today_hourly_uv.empty:
+        current_uv = today_hourly_uv["uv_index"].max()
+
 st.subheader("Today at a Glance")
-col1, col2, col3, col4, col5, col6 = st.columns(6)
+col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
 col1.metric("🌡️ Max Temp (°C)", f"{today['temp_max']:.1f}")
 col2.metric("❄️ Min Temp (°C)", f"{today['temp_min']:.1f}")
 col3.metric("🌧️ Precipitation (mm)", f"{today['precipitation_sum']:.1f}")
 col4.metric("💨 Wind Speed (km/h)", f"{today['wind_speed_max']:.1f}" if today["wind_speed_max"] is not None else "—")
 col5.metric("🧭 Wind Direction", degrees_to_compass(today["wind_direction_dominant"]) if today["wind_direction_dominant"] is not None else "—")
 col6.metric("💧 Avg Humidity (%)", f"{current_humidity:.0f}" if current_humidity is not None else "—")
+col7.metric("☀️ Peak UV Index", f"{current_uv:.1f}" if current_uv is not None else "—")
 
 st.divider()
 
@@ -235,6 +242,24 @@ if "humidity" in hourly.columns:
     st.subheader("💧 Humidity Forecast (%)")
     st.altair_chart(humidity_chart, use_container_width=True)
 
+if "uv_index" in hourly.columns:
+    uv_daily = (
+        hourly.assign(date=hourly["time"].dt.normalize())
+        .groupby("date", as_index=False)["uv_index"]
+        .max()
+    )
+    uv_chart = (
+        alt.Chart(uv_daily)
+        .mark_line()
+        .encode(
+            x=alt.X("date:T", axis=date_axis),
+            y=alt.Y("uv_index:Q", title="UV Index", scale=alt.Scale(domain=[0, 11])),
+        )
+        .properties(height=300)
+    )
+    st.subheader("☀️ Peak UV Index Forecast")
+    st.altair_chart(uv_chart, use_container_width=True)
+
 st.divider()
 
 # ── Summary table ─────────────────────────────────────────────────────────────
@@ -253,6 +278,17 @@ if "humidity" in hourly.columns:
     summary["humidity"] = summary["humidity"].apply(
         lambda v: f"{v:.0f}" if pd.notna(v) else "—"
     )
+if "uv_index" in hourly.columns:
+    uv_daily_summary = (
+        hourly.assign(date=hourly["time"].dt.normalize())
+        .groupby("date", as_index=False)["uv_index"]
+        .max()
+        .rename(columns={"uv_index": "peak_uv"})
+    )
+    summary = summary.merge(uv_daily_summary, on="date", how="left")
+    summary["peak_uv"] = summary["peak_uv"].apply(
+        lambda v: f"{v:.1f}" if pd.notna(v) else "—"
+    )
 summary["date"] = summary["date"].dt.strftime("%a %d")
 rename_map = {
     "date": "Date",
@@ -264,6 +300,8 @@ rename_map = {
 }
 if "humidity" in summary.columns:
     rename_map["humidity"] = "Avg Humidity (%)"
+if "peak_uv" in summary.columns:
+    rename_map["peak_uv"] = "Peak UV Index"
 st.dataframe(
     summary.drop(columns=["wind_direction_dominant"]).rename(columns=rename_map),
     use_container_width=True,

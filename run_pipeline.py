@@ -36,7 +36,19 @@ if "humidity" in hourly.columns:
     daily = daily.merge(humidity_daily, on="date", how="left")
     daily["avg_humidity"] = daily["avg_humidity"].round(0).astype("Int64")
 
+if "uv_index" in hourly.columns:
+    uv_daily = (
+        hourly.assign(date=hourly["time"].dt.normalize())
+        .groupby("date", as_index=False)["uv_index"]
+        .max()
+        .rename(columns={"uv_index": "peak_uv"})
+    )
+    daily = daily.merge(uv_daily, on="date", how="left")
+    daily["peak_uv"] = daily["peak_uv"].round(1)
+
 cols = ["date", "temp_max", "temp_min", "precipitation_sum", "wind_speed_max", "wind_direction_dominant"]
 if "avg_humidity" in daily.columns:
     cols.append("avg_humidity")
+if "peak_uv" in daily.columns:
+    cols.append("peak_uv")
 print(daily[cols].to_string(index=False))
