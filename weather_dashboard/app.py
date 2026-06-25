@@ -169,6 +169,11 @@ col5.metric("🧭 Wind Direction", degrees_to_compass(today["wind_direction_domi
 col6.metric("💧 Avg Humidity (%)", f"{current_humidity:.0f}" if current_humidity is not None else "—")
 col7.metric("☀️ Peak UV Index", f"{current_uv:.1f}" if current_uv is not None else "—")
 
+if "sunrise" in today.index and pd.notna(today["sunrise"]):
+    col_sr, col_ss = st.columns(2)
+    col_sr.metric("🌅 Sunrise", today["sunrise"][11:16])
+    col_ss.metric("🌇 Sunset", today["sunset"][11:16])
+
 st.divider()
 
 # ── Charts ────────────────────────────────────────────────────────────────────
@@ -289,6 +294,14 @@ if "uv_index" in hourly.columns:
     summary["peak_uv"] = summary["peak_uv"].apply(
         lambda v: f"{v:.1f}" if pd.notna(v) else "—"
     )
+if "sunrise" in daily.columns:
+    summary["sunrise"] = summary["sunrise"].apply(
+        lambda v: v[11:16] if isinstance(v, str) and len(v) >= 16 else "—"
+    )
+if "sunset" in daily.columns:
+    summary["sunset"] = summary["sunset"].apply(
+        lambda v: v[11:16] if isinstance(v, str) and len(v) >= 16 else "—"
+    )
 summary["date"] = summary["date"].dt.strftime("%a %d")
 rename_map = {
     "date": "Date",
@@ -302,6 +315,10 @@ if "humidity" in summary.columns:
     rename_map["humidity"] = "Avg Humidity (%)"
 if "peak_uv" in summary.columns:
     rename_map["peak_uv"] = "Peak UV Index"
+if "sunrise" in summary.columns:
+    rename_map["sunrise"] = "Sunrise"
+if "sunset" in summary.columns:
+    rename_map["sunset"] = "Sunset"
 st.dataframe(
     summary.drop(columns=["wind_direction_dominant"]).rename(columns=rename_map),
     use_container_width=True,

@@ -46,9 +46,18 @@ if "uv_index" in hourly.columns:
     daily = daily.merge(uv_daily, on="date", how="left")
     daily["peak_uv"] = daily["peak_uv"].round(1)
 
+if "sunrise" in daily.columns:
+    daily["sunrise"] = daily["sunrise"].str[11:16]
+if "sunset" in daily.columns:
+    daily["sunset"] = daily["sunset"].str[11:16]
+
 cols = ["date", "temp_max", "temp_min", "precipitation_sum", "wind_speed_max", "wind_direction_dominant"]
 if "avg_humidity" in daily.columns:
     cols.append("avg_humidity")
 if "peak_uv" in daily.columns:
     cols.append("peak_uv")
+if "sunrise" in daily.columns:
+    cols.append("sunrise")
+if "sunset" in daily.columns:
+    cols.append("sunset")
 print(daily[cols].to_string(index=False))
