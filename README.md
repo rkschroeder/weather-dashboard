@@ -37,6 +37,22 @@ When you open the app for the first time, no forecast data has been fetched yet.
 
 After the first fetch the full dashboard appears: today's metric cards (max/min temperature, precipitation, wind speed, wind direction, humidity, UV index, cloud cover, sunrise, and sunset), 7-day forecast charts (temperature, precipitation, wind speed, humidity, UV index, cloud cover), and a daily summary table.
 
+## UI — Daily Summary Table
+
+The table shows: Date, Conditions symbol, Max Temp, Min Temp, Precipitation, Wind Speed.
+
+The **Conditions** symbol is derived from avg daily cloud cover (hourly data) and daily precipitation total:
+
+| Symbol | Condition | Rule |
+|--------|-----------|------|
+| 🌧️ | Heavy rain | precipitation ≥ 5 mm |
+| 🌦️ | Light rain | precipitation ≥ 0.5 mm |
+| ☀️ | Sunny | cloud cover < 25% (or no cloud data) |
+| ⛅ | Partly cloudy | cloud cover 25–60% |
+| ☁️ | Cloudy | cloud cover > 60% |
+
+Precipitation takes priority over cloud cover (a rainy day can still be partly cloudy).
+
 ## Run the pipeline from the terminal
 
 `run_pipeline.py` is a developer convenience script for running and verifying the pipeline without opening the Streamlit app. Pass any city name as an argument:

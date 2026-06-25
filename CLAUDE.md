@@ -38,21 +38,9 @@ poetry run python run_pipeline.py Berlin
 - Streamlit reruns the full script on every interaction; SQLite is the persistence layer
 - `init_db()` runs a migration guard on startup: adds any missing columns to existing tables via `ALTER TABLE` so older databases are upgraded automatically
 
-## UI — Daily Summary Table
+## Implementation Notes
 
-The table shows: Date, Conditions symbol, Max Temp, Min Temp, Precipitation, Wind Speed.
-
-The **Conditions** symbol is derived from avg daily cloud cover (hourly data) and daily precipitation total:
-
-| Symbol | Condition | Rule |
-|--------|-----------|------|
-| 🌧️ | Heavy rain | precipitation ≥ 5 mm |
-| 🌦️ | Light rain | precipitation ≥ 0.5 mm |
-| ☀️ | Sunny | cloud cover < 25% (or no cloud data) |
-| ⛅ | Partly cloudy | cloud cover 25–60% |
-| ☁️ | Cloudy | cloud cover > 60% |
-
-Precipitation takes priority over cloud cover (a rainy day can still be partly cloudy).
+- `_weather_symbol(row)` in `app.py` derives the daily conditions emoji from `precipitation_sum` and avg `cloud_cover` (merged from hourly). Precipitation takes priority: ≥5 mm → 🌧️, ≥0.5 mm → 🌦️; then cloud cover: <25% → ☀️, <60% → ⛅, else ☁️. If `cloud_cover` is unavailable, defaults to ☀️. Preserve this priority order if modifying the symbol logic.
 
 ## Dependencies
 
