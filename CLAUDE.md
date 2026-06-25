@@ -2,42 +2,270 @@
 
 ## Project Overview
 
-7-day weather forecast dashboard. Fetches data from Open-Meteo (free, no API key), stores it in SQLite, and displays it via Streamlit.
+7-day weather forecast dashboard. Fetches data from the Open-Meteo API (free, no API key), stores it in SQLite, and displays it via Streamlit. The ETL pipeline is the single source of data — the UI only reads from SQLite.
 
-## Run
+**Tech stack:** Python 3.10+, Poetry, Requests, Pandas, Altair, Streamlit, SQLite.
+
+---
+
+## Commands
 
 ```bash
-# Streamlit dashboard
+# Run the Streamlit dashboard
 poetry run streamlit run weather_dashboard/app.py
 
-# Pipeline from terminal (any city)
+# Run the ETL pipeline from the terminal (any city)
 poetry run python run_pipeline.py Berlin
+poetry run python run_pipeline.py "New York"
 ```
+
+---
+
+## Architecture
+
+```
+User (browser / CLI)
+        │
+        ▼
+  app.py / run_pipeline.py
+        │
+        ▼
+  pipeline/__init__.py  ←  run_pipeline(lat, lon, label)
+        │
+        ├── extract.py   geocode_city(city) + fetch_weather(lat, lon)  →  raw JSON
+        ├── transform.py parse_weather(data)  →  (hourly_rows, daily_rows)
+        └── load.py      upsert_weather(hourly_rows, daily_rows, label)  →  SQLite
+                                  │
+                                  ▼
+                           data/weather.db
+                                  │
+                                  ▼
+                           query.py  →  load_hourly() / load_daily() / load_location_label()
+                                  │
+                                  ▼
+                           app.py  →  metric cards, daily summary table, charts
+```
+
+**Key design decisions:**
+- `run_pipeline(lat, lon)` is the only write path — callable from the UI, CLI, or Airflow.
+- Upserts are idempotent (`INSERT OR REPLACE`). Re-fetching the same location updates rows, never duplicates.
+- Streamlit reruns the full script on every interaction. SQLite is the persistence layer; no in-memory state is carried between reruns except `st.session_state`.
+- `init_db()` is idempotent and safe to call on every pipeline run or query (guarded by `_db_ready` flag).
+
+---
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `run_pipeline.py` | Developer convenience script — verify the pipeline from the terminal without opening the app |
-| `weather_dashboard/pipeline/extract.py` | Open-Meteo forecast + geocoding API calls |
-| `weather_dashboard/pipeline/transform.py` | Parse raw API JSON → typed row tuples |
-| `weather_dashboard/pipeline/load.py` | Upsert rows into SQLite |
-| `weather_dashboard/pipeline/__init__.py` | `run_pipeline(lat, lon)` — orchestrates Extract → Transform → Load |
-| `weather_dashboard/db.py` | DB connection + schema init |
-| `weather_dashboard/query.py` | `load_hourly()` / `load_daily()` — read DataFrames from DB |
-| `weather_dashboard/app.py` | Streamlit UI — sidebar, metric cards, charts |
-| `data/weather.db` | SQLite database with `hourly` and `daily` tables (auto-created) |
+| `run_pipeline.py` | Developer CLI — geocodes a city and runs the full pipeline without the Streamlit app |
+| `weather_dashboard/app.py` | Streamlit UI — sidebar, metric cards, daily summary table, Altair charts |
+| `weather_dashboard/pipeline/__init__.py` | `run_pipeline(lat, lon, label)` — orchestrates Extract → Transform → Load |
+| `weather_dashboard/pipeline/extract.py` | Open-Meteo forecast + geocoding API calls; defines `FetchError` |
+| `weather_dashboard/pipeline/transform.py` | Parses raw API JSON into typed row tuples |
+| `weather_dashboard/pipeline/load.py` | Upserts `hourly_rows` and `daily_rows` into SQLite; writes `last_location` to metadata |
+| `weather_dashboard/db.py` | DB connection, schema creation, migration guard |
+| `weather_dashboard/query.py` | `load_hourly()`, `load_daily()`, `load_location_label()` — read-only DataFrames from SQLite |
+| `weather_dashboard/utils.py` | `degrees_to_compass(degrees)` — converts wind degrees to compass label (e.g. `→ W`) |
+| `data/weather.db` | SQLite database (auto-created on first run) |
 
-## Architecture Notes
+---
 
-- `geocode_city(city)` → converts a city name to geographic coordinates. Returns up to 15 `{lat, lon, label}` dicts via the Open-Meteo geocoding API. Called in two places: the app sidebar (Search City button, so the user can pick the right match when multiple locations share a name) and `run_pipeline.py` (CLI, before passing coordinates to the pipeline).
-- `fetch_weather(lat, lon)` → returns raw JSON with `hourly` and `daily` keys; hourly fields include `temperature_2m`, `precipitation`, `windspeed_10m`, `winddirection_10m`, `relativehumidity_2m`, `cloudcover`; daily fields include `uv_index_max`, `sunrise`, `sunset`
-- `parse_weather(data)` → transforms raw JSON into `(hourly_rows, daily_rows)` tuples
-- `upsert_weather(hourly_rows, daily_rows)` → writes to SQLite with INSERT OR REPLACE
-- `run_pipeline(lat, lon)` → single entry point for the full ETL; callable from Airflow or CLI
-- Streamlit reruns the full script on every interaction; SQLite is the persistence layer
-- `init_db()` runs a migration guard on startup: adds any missing columns to existing tables via `ALTER TABLE` so older databases are upgraded automatically
+## Database Schema
+
+### `hourly` table
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `time` | TEXT (PK) | ISO 8601 datetime string, e.g. `2024-06-25T14:00` |
+| `temperature_2m` | REAL | °C |
+| `precipitation` | REAL | mm |
+| `wind_speed` | REAL | km/h |
+| `wind_direction` | REAL | degrees |
+| `humidity` | REAL | % |
+| `uv_index` | REAL | — |
+| `cloud_cover` | REAL | % |
+
+### `daily` table
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `date` | TEXT (PK) | ISO 8601 date string, e.g. `2024-06-25` |
+| `temp_max` | REAL | °C |
+| `temp_min` | REAL | °C |
+| `precipitation_sum` | REAL | mm |
+| `wind_speed_max` | REAL | km/h |
+| `wind_direction_dominant` | REAL | degrees |
+| `sunrise` | TEXT | ISO 8601 datetime string |
+| `sunset` | TEXT | ISO 8601 datetime string |
+
+### `metadata` table
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `key` | TEXT (PK) | — |
+| `value` | TEXT | — |
+
+Currently stores one key: `last_location` (the display label for the last fetched city, shown in the UI header).
+
+### DB path
+
+Default: `data/weather.db` (relative to the project root). Override with the `WEATHER_DB_PATH` environment variable:
+
+```bash
+WEATHER_DB_PATH=/tmp/test.db poetry run streamlit run weather_dashboard/app.py
+```
+
+### Migration guard
+
+`init_db()` in `db.py` uses a module-level `_db_ready` flag so migrations only run once per process. On each call, it:
+1. Creates tables with `CREATE TABLE IF NOT EXISTS`.
+2. Checks existing columns via `PRAGMA table_info(table)`.
+3. Issues `ALTER TABLE … ADD COLUMN` for any missing columns.
+
+This allows old databases to be upgraded automatically when new columns are added. **When adding a new column:** add it to both the `CREATE TABLE` statement and the `ALTER TABLE` migration guard in `init_db()`.
+
+---
+
+## API Layer
+
+### Geocoding
+
+- **Endpoint:** `https://geocoding-api.open-meteo.com/v1/search`
+- **Function:** `geocode_city(city: str) -> list[dict]` in `extract.py`
+- **Returns:** Up to 15 dicts with keys `lat`, `lon`, `label` (e.g. `"Berlin, Berlin, Germany"`)
+- **Filter:** Results whose `name` field does not contain the search term (case-insensitive) are discarded — this removes fuzzy/alias matches unrelated to the query.
+- **Raises:** `ValueError` if no results; `FetchError` on network/HTTP failure.
+
+### Weather forecast
+
+- **Endpoint:** `https://api.open-meteo.com/v1/forecast`
+- **Function:** `fetch_weather(latitude: float, longitude: float) -> dict` in `extract.py`
+- **Raises:** `FetchError` on network/HTTP failure; `ValueError` if the response is missing `hourly` or `daily` keys.
+
+**Requested API field names vs. internal column names:**
+
+| API field (raw) | Internal column | Table |
+|-----------------|-----------------|-------|
+| `temperature_2m` | `temperature_2m` | hourly |
+| `precipitation` | `precipitation` | hourly |
+| `windspeed_10m` | `wind_speed` | hourly |
+| `winddirection_10m` | `wind_direction` | hourly |
+| `relativehumidity_2m` | `humidity` | hourly |
+| `uv_index` | `uv_index` | hourly |
+| `cloudcover` | `cloud_cover` | hourly |
+| `temperature_2m_max` | `temp_max` | daily |
+| `temperature_2m_min` | `temp_min` | daily |
+| `precipitation_sum` | `precipitation_sum` | daily |
+| `windspeed_10m_max` | `wind_speed_max` | daily |
+| `winddirection_10m_dominant` | `wind_direction_dominant` | daily |
+| `sunrise` | `sunrise` | daily |
+| `sunset` | `sunset` | daily |
+
+**Note:** The API uses `windspeed_10m` (no underscore before 10m) and `cloudcover` (no underscore). These differ from the internal column names `wind_speed` and `cloud_cover`. The mapping lives in `transform.py`.
+
+---
+
+## Core Functions
+
+### `run_pipeline(lat, lon, label="")`
+Entry point for the full ETL. Calls `init_db()`, `fetch_weather()`, `parse_weather()`, `upsert_weather()` in sequence. Safe to call from Airflow, CLI, or Streamlit. The `label` parameter (human-readable city name) is written to the `metadata` table as `last_location`.
+
+### `geocode_city(city)`
+Returns a list of matching location dicts. Called in two places: the Streamlit sidebar (user picks from results) and `run_pipeline.py` (CLI, first result is used automatically after filtering).
+
+### `fetch_weather(latitude, longitude)`
+Returns the raw API JSON dict with `hourly` and `daily` keys. All error handling (network, HTTP, missing fields) raises `FetchError` or `ValueError`.
+
+### `parse_weather(data)`
+Transforms raw API JSON into `(hourly_rows, daily_rows)` — lists of tuples ready for SQLite insertion.
+
+### `upsert_weather(hourly_rows, daily_rows, label="")`
+Writes rows to SQLite using `INSERT OR REPLACE`. Also writes `label` to `metadata.last_location`.
+
+### `init_db()`
+Creates tables and runs migration guard. Idempotent — safe to call multiple times; skips work after the first call per process via `_db_ready`.
+
+### `load_hourly()` / `load_daily()`
+Return DataFrames filtered to rows from today onwards (`WHERE time >= date('now', 'localtime')`). Past data is retained in SQLite but not returned to the UI.
+
+### `load_location_label()`
+Returns the string value of `metadata.last_location`, or empty string if not set.
+
+### `degrees_to_compass(degrees)`
+Converts a wind direction in degrees to a compass string with arrow prefix (e.g. `→ W`, `↗ NE`).
+
+---
+
+## Error Handling
+
+- `FetchError` (defined in `extract.py`, re-exported from `pipeline/__init__.py`) — raised on any network or HTTP failure.
+- `ValueError` — raised for bad API responses or city-not-found cases.
+- Both are caught in `app.py` after `geocode_city()` and `run_pipeline()` calls, shown to the user via `st.error()` followed by `st.stop()`.
+- Import `FetchError` from `weather_dashboard.pipeline` (not directly from `extract.py`).
+
+---
+
+## UI Layer (`app.py`)
+
+### Streamlit session state keys
+
+| Key | Type | Purpose |
+|-----|------|---------|
+| `geo_results` | `list[dict]` | Geocoding results from the last Search City click |
+| `_prev_city` | `str` | Tracks the previous city input value; clears `geo_results` when it changes |
+
+### Layout
+
+1. **Sidebar** — city text input, Search City button, location radio (if multiple results), Fetch Weather button.
+2. **Metric cards** (`st.metric`) — two rows of 4 cards: max/min temp, precipitation, wind speed, wind direction, humidity, UV index, cloud cover, sunrise/sunset.
+3. **Daily summary table** (`st.dataframe`) — 7-row table with Date, Conditions symbol, Max Temp, Min Temp, Precipitation, Wind Speed.
+4. **Forecast charts** (Altair) — three 2-column rows: Temperature (band + lines) + Precipitation, Wind Speed + Humidity, UV Index + Cloud Cover.
+
+### Weather symbol logic (`_weather_symbol(row)` in `app.py`)
+
+Derives a conditions emoji for the daily summary table from `precipitation_sum` and avg `cloud_cover` (merged from hourly via a `groupby` before rendering). **Precipitation takes priority over cloud cover:**
+
+| Symbol | Condition | Rule |
+|--------|-----------|------|
+| 🌧️ | Heavy rain | `precipitation_sum` ≥ 5 mm |
+| 🌦️ | Light rain | `precipitation_sum` ≥ 0.5 mm |
+| ☀️ | Sunny | `cloud_cover` < 25% or missing |
+| ⛅ | Partly cloudy | `cloud_cover` 25–59% |
+| ☁️ | Cloudy | `cloud_cover` ≥ 60% |
+
+**Do not reorder this logic.** A rainy day can still have any cloud cover reading — precipitation must be evaluated first.
+
+### Chart library
+
+Charts are built with [Altair](https://altair-viz.github.io/). All charts use `use_container_width=True` and `height=300`. Axis styling uses `rgba(255,255,255,0.08)` grid lines to match the dark theme.
+
+---
+
+## Extension Guide
+
+### Adding a new hourly weather field
+
+1. Add the API field name to `_FORECAST_PARAMS["hourly"]` in `extract.py`.
+2. Add the mapping (API name → column name) in `transform.py` (`parse_weather`).
+3. Add the column to the `CREATE TABLE hourly` statement in `db.py`.
+4. Add an `ALTER TABLE hourly ADD COLUMN` migration guard in `init_db()`.
+5. Add the column to `load_hourly()` query if it needs filtering (it is included by default via `SELECT *`).
+6. Add a metric card or chart in `app.py`.
+
+### Adding a new daily weather field
+
+Same steps as above but targeting `_FORECAST_PARAMS["daily"]`, the `daily` table, and `load_daily()`.
+
+---
 
 ## Dependencies
 
-Managed by Poetry. Core: `requests`, `pandas`, `streamlit`.
+Managed by Poetry (`pyproject.toml`). Core runtime dependencies:
+
+| Package | Purpose |
+|---------|---------|
+| `requests` | HTTP calls to Open-Meteo APIs |
+| `pandas` | DataFrame manipulation and SQL reads |
+| `streamlit` | Web UI |
+| `altair` | Declarative charts in Streamlit |

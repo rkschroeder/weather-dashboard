@@ -5,9 +5,9 @@ A 7-day weather forecast dashboard built with Streamlit, powered by the [Open-Me
 ## Features
 
 - Search by city name
-- 7-day forecast for temperature (max/min), precipitation, wind speed, humidity, UV index, cloud cover, sunrise, and sunset
-- Today's metrics displayed as live cards: temperature, precipitation, wind, humidity, UV index, cloud cover, sunrise, and sunset
-- Wind direction displayed as arrow compass label (e.g. `→ W`)
+- Today's metrics as live cards: temperature, precipitation, wind speed & direction (e.g. `→ W`), humidity, UV index, cloud cover, sunrise, and sunset
+- Daily summary table: date, conditions symbol, max/min temperature, precipitation, and wind speed
+- 7-day forecast charts for temperature, precipitation, wind speed, humidity, UV index, and cloud cover
 - Data persisted in a local SQLite database
 
 ## Setup
@@ -19,7 +19,7 @@ cd weather_dashboard
 poetry install
 ```
 
-## Run
+## Running the App
 
 ```bash
 poetry run streamlit run weather_dashboard/app.py
@@ -27,19 +27,37 @@ poetry run streamlit run weather_dashboard/app.py
 
 Open `http://localhost:8501`.
 
-## First Run
+### First Run
 
-When you open the app for the first time, no forecast data has been fetched yet. The dashboard will display a welcome screen with three steps to guide you:
+No forecast data has been fetched yet on a fresh install. The dashboard will display a welcome screen with three steps:
 
 1. **Enter a city** — type any city name in the sidebar (default: *Berlin*).
 2. **Search the city** — click **Search City**. If multiple locations match, select the correct one from the list.
 3. **Fetch the forecast** — click **Fetch Weather** to load the 7-day forecast. Data is saved locally so subsequent loads are instant.
 
-After the first fetch the full dashboard appears: today's metric cards (max/min temperature, precipitation, wind speed, wind direction, humidity, UV index, cloud cover, sunrise, and sunset), 7-day forecast charts (temperature, precipitation, wind speed, humidity, UV index, cloud cover), and a daily summary table.
+## Dashboard
 
-## Run the pipeline from the terminal
+After the first fetch, the dashboard shows three sections:
 
-`run_pipeline.py` is a developer convenience script for running and verifying the pipeline without opening the Streamlit app. Pass any city name as an argument:
+- **Metric cards** — today's max/min temperature, precipitation, wind speed, wind direction, humidity, UV index, cloud cover, sunrise, and sunset.
+- **Daily summary table** — a compact overview of the week: Date, Conditions, Max Temp, Min Temp, Precipitation, Wind Speed.
+- **Forecast charts** — 7-day charts for temperature, precipitation, wind speed, humidity, UV index, and cloud cover.
+
+### Conditions Symbol
+
+The **Conditions** symbol in the daily summary table is derived from avg daily cloud cover (hourly data) and daily precipitation total. Precipitation takes priority over cloud cover.
+
+| Symbol | Condition | Rule |
+|--------|-----------|------|
+| 🌧️ | Heavy rain | precipitation ≥ 5 mm |
+| 🌦️ | Light rain | precipitation ≥ 0.5 mm |
+| ☀️ | Sunny | cloud cover < 25% (or no cloud data) |
+| ⛅ | Partly cloudy | cloud cover 25–60% |
+| ☁️ | Cloudy | cloud cover > 60% |
+
+## Developer Tools
+
+`run_pipeline.py` is a convenience script for running and verifying the ETL pipeline without opening the Streamlit app. Pass any city name as an argument:
 
 ```bash
 poetry run python run_pipeline.py Berlin
@@ -66,7 +84,7 @@ weather_dashboard/
     └── app.py                 # Streamlit dashboard
 ```
 
-## Data
+## Database
 
 Fetched data is saved to `data/weather.db` (SQLite, auto-created on first run) in two tables:
 

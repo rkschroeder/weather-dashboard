@@ -166,11 +166,14 @@ if not hourly.empty and "cloud_cover" in hourly.columns:
         current_cloud_cover = today_hourly_cc["cloud_cover"].mean()
 
 st.subheader("Today at a Glance")
-col1, col2, col3, col4, col5, col6, col7, col8 = st.columns(8)
+
+col1, col2, col3, col4 = st.columns(4)
 col1.metric("🌡️ Max Temp (°C)", f"{today['temp_max']:.1f}")
 col2.metric("❄️ Min Temp (°C)", f"{today['temp_min']:.1f}")
 col3.metric("🌧️ Precipitation (mm)", f"{today['precipitation_sum']:.1f}")
 col4.metric("💨 Wind Speed (km/h)", f"{today['wind_speed_max']:.1f}" if today["wind_speed_max"] is not None else "—")
+
+col5, col6, col7, col8 = st.columns(4)
 col5.metric("🧭 Wind Direction", degrees_to_compass(today["wind_direction_dominant"]) if today["wind_direction_dominant"] is not None else "—")
 col6.metric("💧 Avg Humidity (%)", f"{current_humidity:.0f}" if current_humidity is not None else "—")
 col7.metric("☀️ Peak UV Index", f"{current_uv:.1f}" if current_uv is not None else "—")
@@ -183,26 +186,90 @@ if "sunrise" in today.index and pd.notna(today["sunrise"]):
 
 st.divider()
 
+# ── Daily Summary table ────────────────────────────────────────────────────────
+st.subheader("📋 Daily Summary")
+summary = daily.copy()
+
+# Derive per-day avg cloud cover for the weather symbol
+if "cloud_cover" in hourly.columns:
+    cloud_per_day = (
+        hourly.assign(date=hourly["time"].dt.normalize())
+        .groupby("date", as_index=False)["cloud_cover"]
+        .mean()
+    )
+    summary = summary.merge(cloud_per_day, on="date", how="left")
+else:
+    summary["cloud_cover"] = None
+
+def _weather_symbol(row):
+    precip = row["precipitation_sum"] or 0
+    cloud = row["cloud_cover"]
+    if precip >= 5:
+        return "🌧️"
+    if precip >= 0.5:
+        return "🌦️"
+    if cloud is None or pd.isna(cloud):
+        return "☀️"
+    if cloud < 25:
+        return "☀️"
+    if cloud < 60:
+        return "⛅"
+    return "☁️"
+
+summary["conditions"] = summary.apply(_weather_symbol, axis=1)
+summary["date"] = summary["date"].dt.strftime("%a %d")
+
+display_cols = {
+    "date": "Date",
+    "conditions": "Conditions",
+    "temp_max": "Max (°C)",
+    "temp_min": "Min (°C)",
+    "precipitation_sum": "Precip (mm)",
+    "wind_speed_max": "Wind (km/h)",
+}
+st.dataframe(
+    summary[list(display_cols)].rename(columns=display_cols),
+    use_container_width=True,
+    hide_index=True,
+)
+
+st.divider()
+
 # ── Charts ────────────────────────────────────────────────────────────────────
+date_axis = alt.Axis(format="%a %d", tickCount="day", labelAngle=-30, title=None)
+y_axis = alt.Axis(grid=True, gridColor="rgba(255,255,255,0.08)")
+
+# Row A: Temperature (band + lines) | Precipitation
 col_left, col_right = st.columns(2, gap="large")
 
-date_axis = alt.Axis(format="%a %d", tickCount="day", labelAngle=-30, title=None)
-
 with col_left:
-    temp_data = daily[["date", "temp_max", "temp_min"]].melt(
-        "date", var_name="series", value_name="°C"
+    band = alt.Chart(daily).mark_area(opacity=0.15, color="#4FACFE").encode(
+        x=alt.X("date:T", axis=date_axis),
+        y=alt.Y("temp_min:Q", title="°C", axis=y_axis),
+        y2=alt.Y2("temp_max"),
+        tooltip=[
+            alt.Tooltip("date:T", title="Date", format="%a %d"),
+            alt.Tooltip("temp_max:Q", title="Max (°C)", format=".1f"),
+            alt.Tooltip("temp_min:Q", title="Min (°C)", format=".1f"),
+        ],
     )
-    temp_data["series"] = temp_data["series"].map({"temp_max": "Max", "temp_min": "Min"})
-    temp_chart = (
-        alt.Chart(temp_data)
-        .mark_line()
-        .encode(
-            x=alt.X("date:T", axis=date_axis),
-            y=alt.Y("°C:Q", title="°C"),
-            color=alt.Color("series:N", legend=alt.Legend(orient="none", legendX=8, legendY=5, title=None)),
-        )
-        .properties(height=300)
+    line_max = alt.Chart(daily).mark_line(color="#4FACFE").encode(
+        x=alt.X("date:T", axis=date_axis),
+        y=alt.Y("temp_max:Q", title="°C"),
+        tooltip=[
+            alt.Tooltip("date:T", title="Date", format="%a %d"),
+            alt.Tooltip("temp_max:Q", title="Max (°C)", format=".1f"),
+        ],
     )
+    line_min = alt.Chart(daily).mark_line(color="#60A5FA", strokeDash=[4, 2]).encode(
+        x=alt.X("date:T", axis=date_axis),
+        y=alt.Y("temp_min:Q"),
+        tooltip=[
+            alt.Tooltip("date:T", title="Date", format="%a %d"),
+            alt.Tooltip("temp_min:Q", title="Min (°C)", format=".1f"),
+        ],
+    )
+    temp_chart = alt.layer(band, line_max, line_min).properties(height=300)
     st.subheader("🌡️ Temperature Forecast (°C)")
     st.altair_chart(temp_chart, use_container_width=True)
 
@@ -212,13 +279,18 @@ with col_right:
         .mark_bar()
         .encode(
             x=alt.X("date:T", axis=date_axis),
-            y=alt.Y("precipitation_sum:Q", title="mm"),
+            y=alt.Y("precipitation_sum:Q", title="mm", axis=y_axis),
+            tooltip=[
+                alt.Tooltip("date:T", title="Date", format="%a %d"),
+                alt.Tooltip("precipitation_sum:Q", title="Precipitation (mm)", format=".1f"),
+            ],
         )
         .properties(height=300)
     )
     st.subheader("🌧️ Precipitation Forecast (mm)")
     st.altair_chart(precip_chart, use_container_width=True)
 
+# Row B: Wind Speed | Humidity
 wind_avg = (
     hourly.assign(date=hourly["time"].dt.normalize())
     .groupby("date", as_index=False)["wind_speed"]
@@ -229,139 +301,94 @@ wind_chart = (
     .mark_line()
     .encode(
         x=alt.X("date:T", axis=date_axis),
-        y=alt.Y("wind_speed:Q", title="km/h"),
+        y=alt.Y("wind_speed:Q", title="km/h", axis=y_axis),
+        tooltip=[
+            alt.Tooltip("date:T", title="Date", format="%a %d"),
+            alt.Tooltip("wind_speed:Q", title="Wind Speed (km/h)", format=".1f"),
+        ],
     )
     .properties(height=300)
 )
-st.subheader("💨 Wind Speed Forecast (km/h)")
-st.altair_chart(wind_chart, use_container_width=True)
 
-if "humidity" in hourly.columns:
-    humidity_avg = (
-        hourly.assign(date=hourly["time"].dt.normalize())
-        .groupby("date", as_index=False)["humidity"]
-        .mean()
-    )
-    humidity_chart = (
-        alt.Chart(humidity_avg)
-        .mark_line()
-        .encode(
-            x=alt.X("date:T", axis=date_axis),
-            y=alt.Y("humidity:Q", title="%", scale=alt.Scale(domain=[0, 100])),
-        )
-        .properties(height=300)
-    )
-    st.subheader("💧 Humidity Forecast (%)")
-    st.altair_chart(humidity_chart, use_container_width=True)
+col_left, col_right = st.columns(2, gap="large")
+with col_left:
+    st.subheader("💨 Wind Speed Forecast (km/h)")
+    st.altair_chart(wind_chart, use_container_width=True)
 
-if "uv_index" in hourly.columns:
-    uv_daily = (
-        hourly.assign(date=hourly["time"].dt.normalize())
-        .groupby("date", as_index=False)["uv_index"]
-        .max()
-    )
-    uv_chart = (
-        alt.Chart(uv_daily)
-        .mark_line()
-        .encode(
-            x=alt.X("date:T", axis=date_axis),
-            y=alt.Y("uv_index:Q", title="UV Index", scale=alt.Scale(domain=[0, 11])),
+with col_right:
+    if "humidity" in hourly.columns:
+        humidity_avg = (
+            hourly.assign(date=hourly["time"].dt.normalize())
+            .groupby("date", as_index=False)["humidity"]
+            .mean()
         )
-        .properties(height=300)
-    )
-    st.subheader("☀️ Peak UV Index Forecast")
-    st.altair_chart(uv_chart, use_container_width=True)
+        humidity_chart = (
+            alt.Chart(humidity_avg)
+            .mark_line()
+            .encode(
+                x=alt.X("date:T", axis=date_axis),
+                y=alt.Y("humidity:Q", title="%", scale=alt.Scale(domain=[0, 100]), axis=y_axis),
+                tooltip=[
+                    alt.Tooltip("date:T", title="Date", format="%a %d"),
+                    alt.Tooltip("humidity:Q", title="Humidity (%)", format=".0f"),
+                ],
+            )
+            .properties(height=300)
+        )
+        st.subheader("💧 Humidity Forecast (%)")
+        st.altair_chart(humidity_chart, use_container_width=True)
 
-if "cloud_cover" in hourly.columns:
-    cloud_daily = (
-        hourly.assign(date=hourly["time"].dt.normalize())
-        .groupby("date", as_index=False)["cloud_cover"]
-        .mean()
-    )
-    cloud_chart = (
-        alt.Chart(cloud_daily)
-        .mark_area(opacity=0.5)
-        .encode(
-            x=alt.X("date:T", axis=date_axis),
-            y=alt.Y("cloud_cover:Q", title="%", scale=alt.Scale(domain=[0, 100])),
-        )
-        .properties(height=300)
-    )
-    st.subheader("☁️ Cloud Cover Forecast (%)")
-    st.altair_chart(cloud_chart, use_container_width=True)
+# Row C: Peak UV Index | Cloud Cover
+if "uv_index" in hourly.columns or "cloud_cover" in hourly.columns:
+    col_left, col_right = st.columns(2, gap="large")
+
+    with col_left:
+        if "uv_index" in hourly.columns:
+            uv_daily = (
+                hourly.assign(date=hourly["time"].dt.normalize())
+                .groupby("date", as_index=False)["uv_index"]
+                .max()
+            )
+            uv_chart = (
+                alt.Chart(uv_daily)
+                .mark_line()
+                .encode(
+                    x=alt.X("date:T", axis=date_axis),
+                    y=alt.Y("uv_index:Q", title="UV Index", scale=alt.Scale(domain=[0, 11]), axis=y_axis),
+                    tooltip=[
+                        alt.Tooltip("date:T", title="Date", format="%a %d"),
+                        alt.Tooltip("uv_index:Q", title="Peak UV Index", format=".1f"),
+                    ],
+                )
+                .properties(height=300)
+            )
+            st.subheader("☀️ Peak UV Index Forecast")
+            st.altair_chart(uv_chart, use_container_width=True)
+
+    with col_right:
+        if "cloud_cover" in hourly.columns:
+            cloud_daily = (
+                hourly.assign(date=hourly["time"].dt.normalize())
+                .groupby("date", as_index=False)["cloud_cover"]
+                .mean()
+            )
+            cloud_chart = (
+                alt.Chart(cloud_daily)
+                .mark_area(opacity=0.5)
+                .encode(
+                    x=alt.X("date:T", axis=date_axis),
+                    y=alt.Y("cloud_cover:Q", title="%", scale=alt.Scale(domain=[0, 100]), axis=y_axis),
+                    tooltip=[
+                        alt.Tooltip("date:T", title="Date", format="%a %d"),
+                        alt.Tooltip("cloud_cover:Q", title="Cloud Cover (%)", format=".0f"),
+                    ],
+                )
+                .properties(height=300)
+            )
+            st.subheader("☁️ Cloud Cover Forecast (%)")
+            st.altair_chart(cloud_chart, use_container_width=True)
 
 st.divider()
-
-# ── Summary table ─────────────────────────────────────────────────────────────
-st.subheader("📋 Daily Summary")
-summary = daily.copy()
-summary["wind_compass"] = summary["wind_direction_dominant"].apply(
-    lambda d: degrees_to_compass(d) if d is not None else "—"
-)
-if "humidity" in hourly.columns:
-    humidity_daily = (
-        hourly.assign(date=hourly["time"].dt.normalize())
-        .groupby("date", as_index=False)["humidity"]
-        .mean()
-    )
-    summary = summary.merge(humidity_daily, on="date", how="left")
-    summary["humidity"] = summary["humidity"].apply(
-        lambda v: f"{v:.0f}" if pd.notna(v) else "—"
-    )
-if "uv_index" in hourly.columns:
-    uv_daily_summary = (
-        hourly.assign(date=hourly["time"].dt.normalize())
-        .groupby("date", as_index=False)["uv_index"]
-        .max()
-        .rename(columns={"uv_index": "peak_uv"})
-    )
-    summary = summary.merge(uv_daily_summary, on="date", how="left")
-    summary["peak_uv"] = summary["peak_uv"].apply(
-        lambda v: f"{v:.1f}" if pd.notna(v) else "—"
-    )
-if "cloud_cover" in hourly.columns:
-    cloud_daily_summary = (
-        hourly.assign(date=hourly["time"].dt.normalize())
-        .groupby("date", as_index=False)["cloud_cover"]
-        .mean()
-        .rename(columns={"cloud_cover": "avg_cloud_cover"})
-    )
-    summary = summary.merge(cloud_daily_summary, on="date", how="left")
-    summary["avg_cloud_cover"] = summary["avg_cloud_cover"].apply(
-        lambda v: f"{v:.0f}" if pd.notna(v) else "—"
-    )
-if "sunrise" in daily.columns:
-    summary["sunrise"] = summary["sunrise"].apply(
-        lambda v: v[11:16] if isinstance(v, str) and len(v) >= 16 else "—"
-    )
-if "sunset" in daily.columns:
-    summary["sunset"] = summary["sunset"].apply(
-        lambda v: v[11:16] if isinstance(v, str) and len(v) >= 16 else "—"
-    )
-summary["date"] = summary["date"].dt.strftime("%a %d")
-rename_map = {
-    "date": "Date",
-    "temp_max": "Max Temp (°C)",
-    "temp_min": "Min Temp (°C)",
-    "precipitation_sum": "Precipitation (mm)",
-    "wind_speed_max": "Wind Speed (km/h)",
-    "wind_compass": "Wind Dir",
-}
-if "humidity" in summary.columns:
-    rename_map["humidity"] = "Avg Humidity (%)"
-if "peak_uv" in summary.columns:
-    rename_map["peak_uv"] = "Peak UV Index"
-if "avg_cloud_cover" in summary.columns:
-    rename_map["avg_cloud_cover"] = "Avg Cloud Cover (%)"
-if "sunrise" in summary.columns:
-    rename_map["sunrise"] = "Sunrise"
-if "sunset" in summary.columns:
-    rename_map["sunset"] = "Sunset"
-st.dataframe(
-    summary.drop(columns=["wind_direction_dominant"]).rename(columns=rename_map),
-    use_container_width=True,
-    hide_index=True,
-)
 
 st.markdown("""
 <div class="footer">
