@@ -5,8 +5,8 @@ BASE_URL = "https://api.open-meteo.com/v1/forecast"
 GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
 
 _FORECAST_PARAMS = {
-    "hourly": "temperature_2m,precipitation,windspeed_10m,winddirection_10m,relativehumidity_2m,uv_index,cloudcover",
-    "daily": "temperature_2m_max,temperature_2m_min,precipitation_sum,windspeed_10m_max,winddirection_10m_dominant,sunrise,sunset",
+    "hourly": "temperature_2m,apparent_temperature,precipitation,precipitation_probability,windspeed_10m,winddirection_10m,relativehumidity_2m,uv_index,cloudcover",
+    "daily": "temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,windspeed_10m_max,winddirection_10m_dominant,sunrise,sunset",
     "timezone": "auto",
     "forecast_days": 7,
 }

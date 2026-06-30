@@ -5,9 +5,9 @@ A 7-day weather forecast dashboard built with Streamlit, powered by the [Open-Me
 ## Features
 
 - Search by city name
-- Today's metrics as live cards: temperature, precipitation, wind speed & direction (e.g. `→ W`), humidity, UV index, cloud cover, sunrise, and sunset
-- Daily summary table: date, conditions symbol, max/min temperature, precipitation, and wind speed
-- 7-day forecast charts for temperature, precipitation, wind speed, humidity, UV index, and cloud cover
+- Today's metrics as live cards: max/min temperature, apparent temperature (feels like), precipitation probability, precipitation, wind speed & direction (e.g. `→ W`), humidity, UV index, cloud cover, sunrise, and sunset
+- Daily summary table: date, conditions symbol, max/min temperature, precipitation, precipitation probability, and wind speed
+- 7-day forecast charts for temperature (with feels-like line), precipitation, wind speed, humidity, UV index, and cloud cover
 - Data persisted in a local SQLite database
 
 ## Setup
@@ -39,9 +39,12 @@ No forecast data has been fetched yet on a fresh install. The dashboard will dis
 
 After the first fetch, the dashboard shows three sections:
 
-- **Metric cards** — today's max/min temperature, precipitation, wind speed, wind direction, humidity, UV index, cloud cover, sunrise, and sunset.
-- **Daily summary table** — a compact overview of the week: Date, Conditions, Max Temp, Min Temp, Precipitation, Wind Speed.
-- **Forecast charts** — 7-day charts for temperature, precipitation, wind speed, humidity, UV index, and cloud cover.
+- **Metric cards** — three rows of four cards each:
+  - *Row 1:* Max Temp, Min Temp, Apparent Temp (feels like), Precip Probability
+  - *Row 2:* Precipitation, Wind Speed, Wind Direction, Humidity
+  - *Row 3:* Peak UV Index, Avg Cloud Cover, Sunrise, Sunset
+- **Daily summary table** — a compact overview of the week: Date, Conditions, Max Temp, Min Temp, Precipitation, Precip Probability, Wind Speed.
+- **Forecast charts** — 7-day charts for temperature (max, min, feels like), precipitation, wind speed, humidity, UV index, and cloud cover.
 
 ### Conditions Symbol
 
@@ -90,7 +93,7 @@ Fetched data is saved to `data/weather.db` (SQLite, auto-created on first run) i
 
 | Table | Columns |
 |-------|---------|
-| `hourly` | `time`, `temperature_2m`, `precipitation`, `wind_speed`, `wind_direction`, `humidity`, `uv_index`, `cloud_cover` |
-| `daily` | `date`, `temp_max`, `temp_min`, `precipitation_sum`, `wind_speed_max`, `wind_direction_dominant`, `sunrise`, `sunset` |
+| `hourly` | `time`, `temperature_2m`, `apparent_temperature`, `precipitation`, `precipitation_probability`, `wind_speed`, `wind_direction`, `humidity`, `uv_index`, `cloud_cover` |
+| `daily` | `date`, `temp_max`, `temp_min`, `precipitation_sum`, `precipitation_probability_max`, `wind_speed_max`, `wind_direction_dominant`, `sunrise`, `sunset` |
 
 Re-fetching the same location upserts existing rows rather than duplicating them. Existing databases are migrated automatically to add any missing columns.

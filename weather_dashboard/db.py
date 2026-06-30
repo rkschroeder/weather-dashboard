@@ -25,7 +25,9 @@ def init_db() -> None:
                 CREATE TABLE IF NOT EXISTS hourly (
                     time TEXT PRIMARY KEY,
                     temperature_2m REAL,
+                    apparent_temperature REAL,
                     precipitation REAL,
+                    precipitation_probability REAL,
                     wind_speed REAL,
                     wind_direction REAL,
                     humidity REAL,
@@ -40,12 +42,17 @@ def init_db() -> None:
                 conn.execute("ALTER TABLE hourly ADD COLUMN uv_index REAL")
             if "cloud_cover" not in existing:
                 conn.execute("ALTER TABLE hourly ADD COLUMN cloud_cover REAL")
+            if "apparent_temperature" not in existing:
+                conn.execute("ALTER TABLE hourly ADD COLUMN apparent_temperature REAL")
+            if "precipitation_probability" not in existing:
+                conn.execute("ALTER TABLE hourly ADD COLUMN precipitation_probability REAL")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS daily (
                     date TEXT PRIMARY KEY,
                     temp_max REAL,
                     temp_min REAL,
                     precipitation_sum REAL,
+                    precipitation_probability_max REAL,
                     wind_speed_max REAL,
                     wind_direction_dominant REAL,
                     sunrise TEXT,
@@ -57,6 +64,8 @@ def init_db() -> None:
                 conn.execute("ALTER TABLE daily ADD COLUMN sunrise TEXT")
             if "sunset" not in daily_existing:
                 conn.execute("ALTER TABLE daily ADD COLUMN sunset TEXT")
+            if "precipitation_probability_max" not in daily_existing:
+                conn.execute("ALTER TABLE daily ADD COLUMN precipitation_probability_max REAL")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS metadata (
                     key TEXT PRIMARY KEY,
