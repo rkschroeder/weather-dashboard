@@ -58,6 +58,24 @@ The **Conditions** symbol in the daily summary table is derived from avg daily c
 | ⛅ | Partly cloudy | cloud cover 25–60% |
 | ☁️ | Cloudy | cloud cover > 60% |
 
+## Testing
+
+The project includes a unit test suite (50 tests) covering all pipeline modules. No external services or live network calls are required — HTTP calls are mocked and each test gets an isolated SQLite database via a `tmp_db` fixture.
+
+```bash
+poetry run pytest tests/ -v
+```
+
+| Test module | What it covers |
+|-------------|---------------|
+| `test_utils.py` | `degrees_to_compass` — cardinal/intercardinal points, boundary rounding, wrap-around at 360° |
+| `test_transform.py` | `parse_weather` — field order, empty arrays, missing key errors |
+| `test_extract.py` | `geocode_city` / `fetch_weather` — success paths, fuzzy-match filtering, network errors, HTTP errors |
+| `test_db.py` | `init_db` — table creation, idempotency, migration guard for missing columns |
+| `test_load.py` | `upsert_weather` — inserts, upsert conflict replacement, metadata label writes |
+| `test_query.py` | `load_hourly` / `load_daily` / `load_location_label` — DataFrame shape, past-row filter, empty-table default |
+| `test_pipeline.py` | `run_pipeline` — ETL call order, default label, `FetchError` propagation |
+
 ## Developer Tools
 
 `run_pipeline.py` is a convenience script for running and verifying the ETL pipeline without opening the Streamlit app. Pass any city name as an argument:
@@ -75,6 +93,15 @@ It geocodes the city, runs the full ETL pipeline, and prints the resulting 7-day
 weather_dashboard/
 ├── run_pipeline.py            # CLI script — run the pipeline from the terminal
 ├── data/                      # SQLite database (weather.db, auto-created)
+├── tests/
+│   ├── conftest.py            # Shared fixtures (tmp_db, SAMPLE_API_PAYLOAD)
+│   ├── test_utils.py
+│   ├── test_transform.py
+│   ├── test_extract.py
+│   ├── test_db.py
+│   ├── test_load.py
+│   ├── test_query.py
+│   └── test_pipeline.py
 └── weather_dashboard/
     ├── pipeline/
     │   ├── __init__.py        # run_pipeline(lat, lon) — orchestrates ETL
