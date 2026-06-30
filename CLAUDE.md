@@ -62,7 +62,44 @@ poetry run streamlit run weather_dashboard/app.py
 # Run the ETL pipeline from the terminal (any city)
 poetry run python run_pipeline.py Berlin
 poetry run python run_pipeline.py "New York"
+
+# Run the unit test suite
+poetry run pytest tests/ -v
 ```
+
+---
+
+## Testing
+
+The project uses **pytest** (dev dependency). Run with:
+
+```bash
+poetry run pytest tests/ -v
+```
+
+50 unit tests, all passing. No external services or live network calls — HTTP is mocked via `unittest.mock.patch` and each DB-touching test uses an isolated SQLite file via the `tmp_db` fixture in `conftest.py`.
+
+### Test modules
+
+| File | Covers |
+|------|--------|
+| `tests/conftest.py` | `tmp_db` fixture (redirects `DB_PATH` to a temp file, resets `_db_ready` between tests); `SAMPLE_API_PAYLOAD` shared fixture |
+| `tests/test_utils.py` | `degrees_to_compass` — all cardinal/intercardinal directions, boundary rounding, 360° wrap-around |
+| `tests/test_transform.py` | `parse_weather` — correct field order, empty arrays, missing key raises `ValueError` |
+| `tests/test_extract.py` | `geocode_city` / `fetch_weather` — success, fuzzy-match filter, no-results, network errors, HTTP errors |
+| `tests/test_db.py` | `init_db` — creates all 3 tables, idempotency, migration guard adds missing columns to existing DB |
+| `tests/test_load.py` | `upsert_weather` — inserts rows, upsert replaces on PK conflict, label written/overwritten/skipped |
+| `tests/test_query.py` | `load_hourly` / `load_daily` / `load_location_label` — DataFrame columns, past-row filter, empty-table default |
+| `tests/test_pipeline.py` | `run_pipeline` — ETL call order and arguments, default label, `FetchError` propagation |
+
+### `tmp_db` fixture
+
+Defined in `conftest.py`. For each test it:
+1. Creates a fresh SQLite file in pytest's `tmp_path`.
+2. Monkeypatches `db.DB_PATH`, `db.DATA_DIR`, and the `WEATHER_DB_PATH` env var to point at that file.
+3. Resets `db._db_ready = False` so `init_db()` always re-runs from scratch.
+
+This keeps every test fully isolated from the real `data/weather.db`.
 
 ---
 
