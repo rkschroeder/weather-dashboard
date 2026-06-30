@@ -4,7 +4,9 @@ def parse_weather(data: dict) -> tuple[list[tuple], list[tuple]]:
         hourly_rows = list(zip(
             data["hourly"]["time"],
             data["hourly"]["temperature_2m"],
+            data["hourly"]["apparent_temperature"],
             data["hourly"]["precipitation"],
+            data["hourly"]["precipitation_probability"],
             data["hourly"]["windspeed_10m"],
             data["hourly"]["winddirection_10m"],
             data["hourly"]["relativehumidity_2m"],
@@ -16,6 +18,7 @@ def parse_weather(data: dict) -> tuple[list[tuple], list[tuple]]:
             data["daily"]["temperature_2m_max"],
             data["daily"]["temperature_2m_min"],
             data["daily"]["precipitation_sum"],
+            data["daily"]["precipitation_probability_max"],
             data["daily"]["windspeed_10m_max"],
             data["daily"]["winddirection_10m_dominant"],
             data["daily"]["sunrise"],

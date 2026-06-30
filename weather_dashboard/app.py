@@ -165,24 +165,36 @@ if not hourly.empty and "cloud_cover" in hourly.columns:
     if not today_hourly_cc.empty:
         current_cloud_cover = today_hourly_cc["cloud_cover"].mean()
 
+current_apparent_temp = None
+if not hourly.empty and "apparent_temperature" in hourly.columns:
+    today_hourly_at = hourly[hourly["time"].dt.normalize() == today_date]
+    if not today_hourly_at.empty:
+        current_apparent_temp = today_hourly_at["apparent_temperature"].mean()
+
 st.subheader("Today at a Glance")
 
+# Row 1: Temperatures + precipitation probability
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("🌡️ Max Temp (°C)", f"{today['temp_max']:.1f}")
 col2.metric("❄️ Min Temp (°C)", f"{today['temp_min']:.1f}")
-col3.metric("🌧️ Precipitation (mm)", f"{today['precipitation_sum']:.1f}")
-col4.metric("💨 Wind Speed (km/h)", f"{today['wind_speed_max']:.1f}" if today["wind_speed_max"] is not None else "—")
+col3.metric("🌡️ Apparent Temp (°C)", f"{current_apparent_temp:.1f}" if pd.notna(current_apparent_temp) else "—")
+precip_prob = today["precipitation_probability_max"] if "precipitation_probability_max" in today.index else None
+col4.metric("🌂 Precip Probability (%)", f"{precip_prob:.0f}" if precip_prob is not None and pd.notna(precip_prob) else "—")
 
+# Row 2: Precipitation + wind + humidity
 col5, col6, col7, col8 = st.columns(4)
-col5.metric("🧭 Wind Direction", degrees_to_compass(today["wind_direction_dominant"]) if today["wind_direction_dominant"] is not None else "—")
-col6.metric("💧 Avg Humidity (%)", f"{current_humidity:.0f}" if current_humidity is not None else "—")
-col7.metric("☀️ Peak UV Index", f"{current_uv:.1f}" if current_uv is not None else "—")
-col8.metric("☁️ Avg Cloud Cover (%)", f"{current_cloud_cover:.0f}" if current_cloud_cover is not None else "—")
+col5.metric("🌧️ Precipitation (mm)", f"{today['precipitation_sum']:.1f}")
+col6.metric("💨 Wind Speed (km/h)", f"{today['wind_speed_max']:.1f}" if pd.notna(today["wind_speed_max"]) else "—")
+col7.metric("🧭 Wind Direction", degrees_to_compass(today["wind_direction_dominant"]) if pd.notna(today["wind_direction_dominant"]) else "—")
+col8.metric("💧 Avg Humidity (%)", f"{current_humidity:.0f}" if pd.notna(current_humidity) else "—")
 
+# Row 3: UV + cloud cover + sunrise/sunset
+col9, col10, col11, col12 = st.columns(4)
+col9.metric("☀️ Peak UV Index", f"{current_uv:.1f}" if pd.notna(current_uv) else "—")
+col10.metric("☁️ Avg Cloud Cover (%)", f"{current_cloud_cover:.0f}" if pd.notna(current_cloud_cover) else "—")
 if "sunrise" in today.index and pd.notna(today["sunrise"]):
-    col_sr, col_ss = st.columns(2)
-    col_sr.metric("🌅 Sunrise", today["sunrise"][11:16])
-    col_ss.metric("🌇 Sunset", today["sunset"][11:16])
+    col11.metric("🌅 Sunrise", today["sunrise"][11:16])
+    col12.metric("🌇 Sunset", today["sunset"][11:16])
 
 st.divider()
 
@@ -225,10 +237,12 @@ display_cols = {
     "temp_max": "Max (°C)",
     "temp_min": "Min (°C)",
     "precipitation_sum": "Precip (mm)",
+    "precipitation_probability_max": "Precip Prob (%)",
     "wind_speed_max": "Wind (km/h)",
 }
+visible_cols = {k: v for k, v in display_cols.items() if k in summary.columns}
 st.dataframe(
-    summary[list(display_cols)].rename(columns=display_cols),
+    summary[list(visible_cols)].rename(columns=visible_cols),
     use_container_width=True,
     hide_index=True,
 )
@@ -243,51 +257,98 @@ y_axis = alt.Axis(grid=True, gridColor="rgba(255,255,255,0.08)")
 col_left, col_right = st.columns(2, gap="large")
 
 with col_left:
-    band = alt.Chart(daily).mark_area(opacity=0.15, color="#4FACFE").encode(
+    # Merge apparent temperature into daily so we can use a single combined tooltip
+    if "apparent_temperature" in hourly.columns and not hourly.empty:
+        apparent_temp_daily = (
+            hourly.assign(date=hourly["time"].dt.normalize())
+            .groupby("date", as_index=False)["apparent_temperature"]
+            .mean()
+        )
+        daily_temp = daily.merge(apparent_temp_daily, on="date", how="left")
+    else:
+        daily_temp = daily.copy()
+
+    # Long format for lines + automatic color legend
+    melt_vars = ["temp_max", "temp_min"] + (["apparent_temperature"] if "apparent_temperature" in daily_temp.columns else [])
+    temp_long = daily_temp[["date"] + melt_vars].melt("date", var_name="series", value_name="temperature")
+    temp_long["series"] = temp_long["series"].map({
+        "temp_max": "Max Temp",
+        "temp_min": "Min Temp",
+        "apparent_temperature": "Feels Like",
+    })
+
+    color_domain = ["Max Temp", "Min Temp", "Feels Like"]
+    color_range  = ["#FF6B6B", "#60A5FA", "#FBBF24"]
+
+    band = alt.Chart(daily_temp).mark_area(opacity=0.1).encode(
         x=alt.X("date:T", axis=date_axis),
         y=alt.Y("temp_min:Q", title="°C", axis=y_axis),
         y2=alt.Y2("temp_max"),
-        tooltip=[
-            alt.Tooltip("date:T", title="Date", format="%a %d"),
-            alt.Tooltip("temp_max:Q", title="Max (°C)", format=".1f"),
-            alt.Tooltip("temp_min:Q", title="Min (°C)", format=".1f"),
-        ],
+        color=alt.value("#4FACFE"),
     )
-    line_max = alt.Chart(daily).mark_line(color="#4FACFE").encode(
-        x=alt.X("date:T", axis=date_axis),
-        y=alt.Y("temp_max:Q", title="°C"),
-        tooltip=[
-            alt.Tooltip("date:T", title="Date", format="%a %d"),
-            alt.Tooltip("temp_max:Q", title="Max (°C)", format=".1f"),
-        ],
+
+    lines = (
+        alt.Chart(temp_long)
+        .mark_line(strokeWidth=2.5, point=alt.OverlayMarkDef(filled=True, size=55))
+        .encode(
+            x=alt.X("date:T", axis=date_axis),
+            y=alt.Y("temperature:Q", title="°C", axis=y_axis),
+            color=alt.Color(
+                "series:N",
+                scale=alt.Scale(domain=color_domain, range=color_range),
+                legend=alt.Legend(orient="bottom", title=None, labelFontSize=12, symbolSize=100, direction="horizontal"),
+            ),
+            strokeDash=alt.condition(
+                alt.datum.series == "Feels Like",
+                alt.value([5, 3]),
+                alt.value([0]),
+            ),
+            tooltip=[
+                alt.Tooltip("date:T", title="Date", format="%A, %b %d"),
+                alt.Tooltip("series:N", title=""),
+                alt.Tooltip("temperature:Q", title="°C", format=".1f"),
+            ],
+        )
     )
-    line_min = alt.Chart(daily).mark_line(color="#60A5FA", strokeDash=[4, 2]).encode(
-        x=alt.X("date:T", axis=date_axis),
-        y=alt.Y("temp_min:Q"),
-        tooltip=[
-            alt.Tooltip("date:T", title="Date", format="%a %d"),
-            alt.Tooltip("temp_min:Q", title="Min (°C)", format=".1f"),
-        ],
+
+    # Invisible overlay to show all three values in one tooltip on hover
+    combined_tt = [alt.Tooltip("date:T", title="Date", format="%A, %b %d"),
+                   alt.Tooltip("temp_max:Q", title="Max (°C)", format=".1f"),
+                   alt.Tooltip("temp_min:Q", title="Min (°C)", format=".1f")]
+    if "apparent_temperature" in daily_temp.columns:
+        combined_tt.append(alt.Tooltip("apparent_temperature:Q", title="Feels Like (°C)", format=".1f"))
+    overlay = (
+        alt.Chart(daily_temp)
+        .mark_point(opacity=0, size=400)
+        .encode(x=alt.X("date:T"), y=alt.Y("temp_max:Q"), tooltip=combined_tt)
     )
-    temp_chart = alt.layer(band, line_max, line_min).properties(height=300)
-    st.subheader("🌡️ Temperature Forecast (°C)")
+
+    temp_chart = alt.layer(band, lines, overlay).properties(height=350)
+    st.subheader("🌡️ Temperature (°C)")
     st.altair_chart(temp_chart, use_container_width=True)
 
 with col_right:
+    max_precip = float(daily["precipitation_sum"].max()) if not daily.empty else 10
     precip_chart = (
         alt.Chart(daily)
-        .mark_bar()
+        .mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4)
         .encode(
             x=alt.X("date:T", axis=date_axis),
-            y=alt.Y("precipitation_sum:Q", title="mm", axis=y_axis),
+            y=alt.Y("precipitation_sum:Q", title="Precipitation (mm)", axis=y_axis),
+            color=alt.Color(
+                "precipitation_sum:Q",
+                scale=alt.Scale(scheme="blues", domain=[0, max(max_precip, 1)]),
+                legend=None,
+            ),
             tooltip=[
-                alt.Tooltip("date:T", title="Date", format="%a %d"),
+                alt.Tooltip("date:T", title="Date", format="%A, %b %d"),
                 alt.Tooltip("precipitation_sum:Q", title="Precipitation (mm)", format=".1f"),
+                alt.Tooltip("precipitation_probability_max:Q", title="Precip Probability (%)", format=".0f"),
             ],
         )
-        .properties(height=300)
+        .properties(height=350)
     )
-    st.subheader("🌧️ Precipitation Forecast (mm)")
+    st.subheader("🌧️ Precipitation (mm)")
     st.altair_chart(precip_chart, use_container_width=True)
 
 # Row B: Wind Speed | Humidity
