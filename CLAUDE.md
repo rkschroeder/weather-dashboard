@@ -4,7 +4,52 @@
 
 7-day weather forecast dashboard. Fetches data from the Open-Meteo API (free, no API key), stores it in SQLite, and displays it via Streamlit. The ETL pipeline is the single source of data — the UI only reads from SQLite.
 
-**Tech stack:** Python 3.10+, Poetry, Requests, Pandas, Altair, Streamlit, SQLite.
+**Tech stack:** Python 3.10+, Poetry, Pandas. Streamlit, SQLite.
+
+---
+
+## Current Status
+
+### Implemented features
+
+**ETL pipeline**
+- Geocodes any city name via Open-Meteo geocoding API (up to 15 results, fuzzy-match filtered)
+- Fetches 7-day hourly + daily forecast from Open-Meteo forecast API
+- Upserts data into SQLite (`INSERT OR REPLACE` — idempotent, no duplicates)
+- Auto-migration guard: existing databases are upgraded when new columns are added
+
+**Hourly fields stored:** `temperature_2m`, `apparent_temperature`, `precipitation`, `precipitation_probability`, `wind_speed`, `wind_direction`, `humidity`, `uv_index`, `cloud_cover`
+
+**Daily fields stored:** `temp_max`, `temp_min`, `precipitation_sum`, `precipitation_probability_max`, `wind_speed_max`, `wind_direction_dominant`, `sunrise`, `sunset`
+
+**Dashboard UI**
+- Sidebar: city search, geocode results picker, Fetch Weather button
+- Metric cards — 3 rows of 4:
+  - Temperatures: Max Temp, Min Temp, Apparent Temp, Precip Probability
+  - Conditions: Precipitation, Wind Speed, Wind Direction, Humidity
+  - Other: Peak UV Index, Cloud Cover, Sunrise, Sunset
+- Daily summary table: Date, Conditions symbol, Max Temp, Min Temp, Precipitation, Precip Probability, Wind Speed
+- Forecast charts (Altair, 2-column layout):
+  - Temperature: shaded band + Max/Min/Feels Like lines with color legend and point markers
+  - Precipitation: intensity-gradient bars (blue scale by mm)
+  - Wind Speed | Humidity
+  - Peak UV Index | Cloud Cover
+
+---
+
+## Next Steps
+
+Potential improvements roughly in priority order:
+
+1. **Hourly forecast view** — current charts aggregate hourly data to daily; add a toggle or separate section showing true hourly detail (e.g. hourly temperature curve for today)
+2. **Location history** — remember previously fetched cities in `st.session_state` or a `locations` metadata table so users can switch without re-searching
+3. **Threshold alerts** — highlight days in the daily table that exceed user-defined thresholds (e.g. UV > 7, precipitation > 10 mm, temperature > 35°C)
+4. **Wind chill / heat index** — derive and display alongside apparent temperature for more context
+5. **Snowfall field** — add `snowfall` and `snowfall_sum` from Open-Meteo (same extension pattern as existing fields)
+6. **CSV export** — add a download button (`st.download_button`) for the daily summary DataFrame
+7. **Multi-city comparison** — allow fetching multiple cities and overlaying them on the same chart
+8. **Deploy to Streamlit Cloud** — add `requirements.txt` export (`poetry export`) and `secrets.toml` stub, document deployment steps
+9. **Automated refresh** — schedule the pipeline via Airflow or a simple cron job so data stays fresh without manual Fetch clicks
 
 ---
 
@@ -79,7 +124,9 @@ User (browser / CLI)
 |--------|------|-------|
 | `time` | TEXT (PK) | ISO 8601 datetime string, e.g. `2024-06-25T14:00` |
 | `temperature_2m` | REAL | °C |
+| `apparent_temperature` | REAL | °C — perceived/feels-like temperature |
 | `precipitation` | REAL | mm |
+| `precipitation_probability` | REAL | % |
 | `wind_speed` | REAL | km/h |
 | `wind_direction` | REAL | degrees |
 | `humidity` | REAL | % |
@@ -94,6 +141,7 @@ User (browser / CLI)
 | `temp_max` | REAL | °C |
 | `temp_min` | REAL | °C |
 | `precipitation_sum` | REAL | mm |
+| `precipitation_probability_max` | REAL | % — max hourly probability for the day |
 | `wind_speed_max` | REAL | km/h |
 | `wind_direction_dominant` | REAL | degrees |
 | `sunrise` | TEXT | ISO 8601 datetime string |
@@ -148,7 +196,9 @@ This allows old databases to be upgraded automatically when new columns are adde
 | API field (raw) | Internal column | Table |
 |-----------------|-----------------|-------|
 | `temperature_2m` | `temperature_2m` | hourly |
+| `apparent_temperature` | `apparent_temperature` | hourly |
 | `precipitation` | `precipitation` | hourly |
+| `precipitation_probability` | `precipitation_probability` | hourly |
 | `windspeed_10m` | `wind_speed` | hourly |
 | `winddirection_10m` | `wind_direction` | hourly |
 | `relativehumidity_2m` | `humidity` | hourly |
@@ -157,6 +207,7 @@ This allows old databases to be upgraded automatically when new columns are adde
 | `temperature_2m_max` | `temp_max` | daily |
 | `temperature_2m_min` | `temp_min` | daily |
 | `precipitation_sum` | `precipitation_sum` | daily |
+| `precipitation_probability_max` | `precipitation_probability_max` | daily |
 | `windspeed_10m_max` | `wind_speed_max` | daily |
 | `winddirection_10m_dominant` | `wind_direction_dominant` | daily |
 | `sunrise` | `sunrise` | daily |
@@ -218,9 +269,12 @@ Converts a wind direction in degrees to a compass string with arrow prefix (e.g.
 ### Layout
 
 1. **Sidebar** — city text input, Search City button, location radio (if multiple results), Fetch Weather button.
-2. **Metric cards** (`st.metric`) — two rows of 4 cards: max/min temp, precipitation, wind speed, wind direction, humidity, UV index, cloud cover, sunrise/sunset.
-3. **Daily summary table** (`st.dataframe`) — 7-row table with Date, Conditions symbol, Max Temp, Min Temp, Precipitation, Wind Speed.
-4. **Forecast charts** (Altair) — three 2-column rows: Temperature (band + lines) + Precipitation, Wind Speed + Humidity, UV Index + Cloud Cover.
+2. **Metric cards** (`st.metric`) — three rows of 4 cards:
+   - *Row 1:* Max Temp, Min Temp, Apparent Temp (daily mean from hourly), Precip Probability (from `daily.precipitation_probability_max`)
+   - *Row 2:* Precipitation, Wind Speed, Wind Direction, Avg Humidity (daily mean from hourly)
+   - *Row 3:* Peak UV Index (daily max from hourly), Avg Cloud Cover (daily mean from hourly), Sunrise, Sunset
+3. **Daily summary table** (`st.dataframe`) — 7-row table with Date, Conditions symbol, Max Temp, Min Temp, Precipitation, Precip Probability, Wind Speed.
+4. **Forecast charts** (Altair) — three 2-column rows: Temperature + Precipitation, Wind Speed + Humidity, UV Index + Cloud Cover.
 
 ### Weather symbol logic (`_weather_symbol(row)` in `app.py`)
 
@@ -236,9 +290,13 @@ Derives a conditions emoji for the daily summary table from `precipitation_sum` 
 
 **Do not reorder this logic.** A rainy day can still have any cloud cover reading — precipitation must be evaluated first.
 
+### Temperature chart
+
+Uses a long-format DataFrame (`temp_long`) combining `temp_max`, `temp_min`, and `apparent_temperature` (daily mean aggregated from hourly) so Altair can render a single chart with an automatic color legend. The `color` encoding drives the legend; `strokeDash` is conditioned on `series == "Feels Like"` to render it dashed. An invisible `mark_point` overlay layer carries the combined tooltip (all three values for a given day).
+
 ### Chart library
 
-Charts are built with [Altair](https://altair-viz.github.io/). All charts use `use_container_width=True` and `height=300`. Axis styling uses `rgba(255,255,255,0.08)` grid lines to match the dark theme.
+Charts are built with [Altair](https://altair-viz.github.io/). All charts use `use_container_width=True`. Temperature and precipitation charts use `height=350`; other charts use `height=300`. Axis styling uses `rgba(255,255,255,0.08)` grid lines to match the dark theme.
 
 ---
 
