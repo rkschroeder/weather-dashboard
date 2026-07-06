@@ -4,7 +4,7 @@ A 7-day weather forecast dashboard built with Streamlit, powered by the [Open-Me
 
 ## Features
 
-- Search by city name
+- Search by city name with persistent location history — previously fetched cities appear as one-click buttons in the sidebar
 - Today's metrics as live cards: max/min temperature, apparent temperature (feels like), precipitation probability, precipitation, wind speed & direction (e.g. `→ W`), humidity, UV index, cloud cover, sunrise, and sunset
 - Daily summary table: date, conditions symbol, max/min temperature, precipitation, precipitation probability, and wind speed
 - 7-day forecast charts for temperature (with feels-like line), precipitation, wind speed, humidity, UV index, and cloud cover
@@ -55,12 +55,12 @@ The **Conditions** symbol in the daily summary table is derived from avg daily c
 | 🌧️ | Heavy rain | precipitation ≥ 5 mm |
 | 🌦️ | Light rain | precipitation ≥ 0.5 mm |
 | ☀️ | Sunny | cloud cover < 25% (or no cloud data) |
-| ⛅ | Partly cloudy | cloud cover 25–60% |
-| ☁️ | Cloudy | cloud cover > 60% |
+| ⛅ | Partly cloudy | cloud cover 25–59% |
+| ☁️ | Cloudy | cloud cover ≥ 60% |
 
 ## Testing
 
-The project includes a unit test suite (50 tests) covering all pipeline modules. No external services or live network calls are required — HTTP calls are mocked and each test gets an isolated SQLite database via a `tmp_db` fixture.
+The project includes a unit test suite (59 tests) covering all pipeline modules. No external services or live network calls are required — HTTP calls are mocked and each test gets an isolated SQLite database via a `tmp_db` fixture.
 
 ```bash
 poetry run pytest tests/ -v
@@ -71,9 +71,9 @@ poetry run pytest tests/ -v
 | `test_utils.py` | `degrees_to_compass` — cardinal/intercardinal points, boundary rounding, wrap-around at 360° |
 | `test_transform.py` | `parse_weather` — field order, empty arrays, missing key errors |
 | `test_extract.py` | `geocode_city` / `fetch_weather` — success paths, fuzzy-match filtering, network errors, HTTP errors |
-| `test_db.py` | `init_db` — table creation, idempotency, migration guard for missing columns |
-| `test_load.py` | `upsert_weather` — inserts, upsert conflict replacement, metadata label writes |
-| `test_query.py` | `load_hourly` / `load_daily` / `load_location_label` — DataFrame shape, past-row filter, empty-table default |
+| `test_db.py` | `init_db` — table creation (all 4 tables), idempotency, migration guard for missing columns including `locations` |
+| `test_load.py` | `upsert_weather` — inserts, upsert conflict replacement, metadata label writes, location row written/skipped |
+| `test_query.py` | `load_hourly` / `load_daily` / `load_location_label` / `load_location_history` — DataFrame shape, past-row filter, ordering, limit, empty-table default |
 | `test_pipeline.py` | `run_pipeline` — ETL call order, default label, `FetchError` propagation |
 
 ## Developer Tools
@@ -122,5 +122,7 @@ Fetched data is saved to `data/weather.db` (SQLite, auto-created on first run) i
 |-------|---------|
 | `hourly` | `time`, `temperature_2m`, `apparent_temperature`, `precipitation`, `precipitation_probability`, `wind_speed`, `wind_direction`, `humidity`, `uv_index`, `cloud_cover` |
 | `daily` | `date`, `temp_max`, `temp_min`, `precipitation_sum`, `precipitation_probability_max`, `wind_speed_max`, `wind_direction_dominant`, `sunrise`, `sunset` |
+| `locations` | `label`, `lat`, `lon`, `last_fetched` |
+| `metadata` | `key`, `value` |
 
 Re-fetching the same location upserts existing rows rather than duplicating them. Existing databases are migrated automatically to add any missing columns.

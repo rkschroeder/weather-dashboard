@@ -23,7 +23,7 @@
 **Daily fields stored:** `temp_max`, `temp_min`, `precipitation_sum`, `precipitation_probability_max`, `wind_speed_max`, `wind_direction_dominant`, `sunrise`, `sunset`
 
 **Dashboard UI**
-- Sidebar: city search, geocode results picker, Fetch Weather button
+- Sidebar: Recent Cities expander (one-click reload from SQLite `locations` table), city search, geocode results picker, Fetch Weather button
 - Metric cards — 3 rows of 4:
   - Temperatures: Max Temp, Min Temp, Apparent Temp, Precip Probability
   - Conditions: Precipitation, Wind Speed, Wind Direction, Humidity
@@ -42,14 +42,13 @@
 Potential improvements roughly in priority order:
 
 1. **Hourly forecast view** — current charts aggregate hourly data to daily; add a toggle or separate section showing true hourly detail (e.g. hourly temperature curve for today)
-2. **Location history** — remember previously fetched cities in `st.session_state` or a `locations` metadata table so users can switch without re-searching
-3. **Threshold alerts** — highlight days in the daily table that exceed user-defined thresholds (e.g. UV > 7, precipitation > 10 mm, temperature > 35°C)
-4. **Wind chill / heat index** — derive and display alongside apparent temperature for more context
-5. **Snowfall field** — add `snowfall` and `snowfall_sum` from Open-Meteo (same extension pattern as existing fields)
-6. **CSV export** — add a download button (`st.download_button`) for the daily summary DataFrame
-7. **Multi-city comparison** — allow fetching multiple cities and overlaying them on the same chart
-8. **Deploy to Streamlit Cloud** — add `requirements.txt` export (`poetry export`) and `secrets.toml` stub, document deployment steps
-9. **Automated refresh** — schedule the pipeline via Airflow or a simple cron job so data stays fresh without manual Fetch clicks
+2. **Threshold alerts** — highlight days in the daily table that exceed user-defined thresholds (e.g. UV > 7, precipitation > 10 mm, temperature > 35°C)
+3. **Wind chill / heat index** — derive and display alongside apparent temperature for more context
+4. **Snowfall field** — add `snowfall` and `snowfall_sum` from Open-Meteo (same extension pattern as existing fields)
+5. **CSV export** — add a download button (`st.download_button`) for the daily summary DataFrame
+6. **Multi-city comparison** — allow fetching multiple cities and overlaying them on the same chart
+7. **Deploy to Streamlit Cloud** — add `requirements.txt` export (`poetry export`) and `secrets.toml` stub, document deployment steps
+8. **Automated refresh** — schedule the pipeline via Airflow or a simple cron job so data stays fresh without manual Fetch clicks
 
 ---
 
@@ -77,7 +76,7 @@ The project uses **pytest** (dev dependency). Run with:
 poetry run pytest tests/ -v
 ```
 
-50 unit tests, all passing. No external services or live network calls — HTTP is mocked via `unittest.mock.patch` and each DB-touching test uses an isolated SQLite file via the `tmp_db` fixture in `conftest.py`.
+59 unit tests, all passing. No external services or live network calls — HTTP is mocked via `unittest.mock.patch` and each DB-touching test uses an isolated SQLite file via the `tmp_db` fixture in `conftest.py`.
 
 ### Test modules
 
@@ -87,9 +86,9 @@ poetry run pytest tests/ -v
 | `tests/test_utils.py` | `degrees_to_compass` — all cardinal/intercardinal directions, boundary rounding, 360° wrap-around |
 | `tests/test_transform.py` | `parse_weather` — correct field order, empty arrays, missing key raises `ValueError` |
 | `tests/test_extract.py` | `geocode_city` / `fetch_weather` — success, fuzzy-match filter, no-results, network errors, HTTP errors |
-| `tests/test_db.py` | `init_db` — creates all 3 tables, idempotency, migration guard adds missing columns to existing DB |
-| `tests/test_load.py` | `upsert_weather` — inserts rows, upsert replaces on PK conflict, label written/overwritten/skipped |
-| `tests/test_query.py` | `load_hourly` / `load_daily` / `load_location_label` — DataFrame columns, past-row filter, empty-table default |
+| `tests/test_db.py` | `init_db` — creates all 4 tables, idempotency, migration guard adds missing columns to existing DB (including `locations`) |
+| `tests/test_load.py` | `upsert_weather` — inserts rows, upsert replaces on PK conflict, label written/overwritten/skipped, location row written/skipped |
+| `tests/test_query.py` | `load_hourly` / `load_daily` / `load_location_label` / `load_location_history` — DataFrame columns, past-row filter, empty-table default, ordering, limit |
 | `tests/test_pipeline.py` | `run_pipeline` — ETL call order and arguments, default label, `FetchError` propagation |
 
 ### `tmp_db` fixture
@@ -116,13 +115,13 @@ User (browser / CLI)
         │
         ├── extract.py   geocode_city(city) + fetch_weather(lat, lon)  →  raw JSON
         ├── transform.py parse_weather(data)  →  (hourly_rows, daily_rows)
-        └── load.py      upsert_weather(hourly_rows, daily_rows, label)  →  SQLite
+        └── load.py      upsert_weather(hourly_rows, daily_rows, lat, lon, label)  →  SQLite
                                   │
                                   ▼
-                           data/weather.db
+                           data/weather.db  (hourly, daily, metadata, locations)
                                   │
                                   ▼
-                           query.py  →  load_hourly() / load_daily() / load_location_label()
+                           query.py  →  load_hourly() / load_daily() / load_location_label() / load_location_history()
                                   │
                                   ▼
                            app.py  →  metric cards, daily summary table, charts
@@ -145,9 +144,9 @@ User (browser / CLI)
 | `weather_dashboard/pipeline/__init__.py` | `run_pipeline(lat, lon, label)` — orchestrates Extract → Transform → Load |
 | `weather_dashboard/pipeline/extract.py` | Open-Meteo forecast + geocoding API calls; defines `FetchError` |
 | `weather_dashboard/pipeline/transform.py` | Parses raw API JSON into typed row tuples |
-| `weather_dashboard/pipeline/load.py` | Upserts `hourly_rows` and `daily_rows` into SQLite; writes `last_location` to metadata |
-| `weather_dashboard/db.py` | DB connection, schema creation, migration guard |
-| `weather_dashboard/query.py` | `load_hourly()`, `load_daily()`, `load_location_label()` — read-only DataFrames from SQLite |
+| `weather_dashboard/pipeline/load.py` | Upserts `hourly_rows` and `daily_rows` into SQLite; writes `last_location` to metadata and city to `locations` |
+| `weather_dashboard/db.py` | DB connection, schema creation, `_ensure_column` migration helper |
+| `weather_dashboard/query.py` | `load_hourly()`, `load_daily()`, `load_location_label()`, `load_location_history()` — read-only from SQLite |
 | `weather_dashboard/utils.py` | `degrees_to_compass(degrees)` — converts wind degrees to compass label (e.g. `→ W`) |
 | `data/weather.db` | SQLite database (auto-created on first run) |
 
@@ -193,6 +192,17 @@ User (browser / CLI)
 
 Currently stores one key: `last_location` (the display label for the last fetched city, shown in the UI header).
 
+### `locations` table
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `label` | TEXT (PK) | Display name, e.g. `"Berlin, Berlin, Germany"` |
+| `lat` | REAL | Latitude |
+| `lon` | REAL | Longitude |
+| `last_fetched` | TEXT | SQLite `datetime('now')` timestamp, updated on each fetch |
+
+Populated by `upsert_weather` whenever `label`, `lat`, and `lon` are all provided. Used by `load_location_history()` to render the Recent Cities sidebar section.
+
 ### DB path
 
 Default: `data/weather.db` (relative to the project root). Override with the `WEATHER_DB_PATH` environment variable:
@@ -205,10 +215,11 @@ WEATHER_DB_PATH=/tmp/test.db poetry run streamlit run weather_dashboard/app.py
 
 `init_db()` in `db.py` uses a module-level `_db_ready` flag so migrations only run once per process. On each call, it:
 1. Creates tables with `CREATE TABLE IF NOT EXISTS`.
-2. Checks existing columns via `PRAGMA table_info(table)`.
-3. Issues `ALTER TABLE … ADD COLUMN` for any missing columns.
+2. Calls `_ensure_column(conn, table, column, type)` for each column added after the initial schema.
 
-This allows old databases to be upgraded automatically when new columns are added. **When adding a new column:** add it to both the `CREATE TABLE` statement and the `ALTER TABLE` migration guard in `init_db()`.
+`_ensure_column` checks `PRAGMA table_info(table)` and issues `ALTER TABLE … ADD COLUMN` only if the column is absent. This is needed because `ALTER TABLE` has no `IF NOT EXISTS` clause — without the check it would raise a duplicate-column error on fresh databases where the column was already created by `CREATE TABLE`.
+
+This allows old databases to be upgraded automatically when new columns are added. **When adding a new column:** add it to the `CREATE TABLE` statement and call `_ensure_column` for it in `init_db()`.
 
 ---
 
@@ -268,8 +279,8 @@ Returns the raw API JSON dict with `hourly` and `daily` keys. All error handling
 ### `parse_weather(data)`
 Transforms raw API JSON into `(hourly_rows, daily_rows)` — lists of tuples ready for SQLite insertion.
 
-### `upsert_weather(hourly_rows, daily_rows, label="")`
-Writes rows to SQLite using `INSERT OR REPLACE`. Also writes `label` to `metadata.last_location`.
+### `upsert_weather(hourly_rows, daily_rows, lat=None, lon=None, label="")`
+Writes rows to SQLite using `INSERT OR REPLACE`. Also writes `label` to `metadata.last_location`. When `label`, `lat`, and `lon` are all provided, upserts a row into the `locations` table with the current timestamp.
 
 ### `init_db()`
 Creates tables and runs migration guard. Idempotent — safe to call multiple times; skips work after the first call per process via `_db_ready`.
@@ -279,6 +290,9 @@ Return DataFrames filtered to rows from today onwards (`WHERE time >= date('now'
 
 ### `load_location_label()`
 Returns the string value of `metadata.last_location`, or empty string if not set.
+
+### `load_location_history(limit=10)`
+Returns up to `limit` previously fetched locations from the `locations` table, ordered by `last_fetched` descending (most recent first). Each entry is a dict with `label`, `lat`, and `lon`.
 
 ### `degrees_to_compass(degrees)`
 Converts a wind direction in degrees to a compass string with arrow prefix (e.g. `→ W`, `↗ NE`).
@@ -305,7 +319,7 @@ Converts a wind direction in degrees to a compass string with arrow prefix (e.g.
 
 ### Layout
 
-1. **Sidebar** — city text input, Search City button, location radio (if multiple results), Fetch Weather button.
+1. **Sidebar** — Recent Cities expander (buttons for each previously fetched city, most recent first; clicking one calls `run_pipeline` directly and reruns the page), city text input, Search City button, location radio (if multiple results), Fetch Weather button.
 2. **Metric cards** (`st.metric`) — three rows of 4 cards:
    - *Row 1:* Max Temp, Min Temp, Apparent Temp (daily mean from hourly), Precip Probability (from `daily.precipitation_probability_max`)
    - *Row 2:* Precipitation, Wind Speed, Wind Direction, Avg Humidity (daily mean from hourly)
@@ -344,7 +358,7 @@ Charts are built with [Altair](https://altair-viz.github.io/). All charts use `u
 1. Add the API field name to `_FORECAST_PARAMS["hourly"]` in `extract.py`.
 2. Add the mapping (API name → column name) in `transform.py` (`parse_weather`).
 3. Add the column to the `CREATE TABLE hourly` statement in `db.py`.
-4. Add an `ALTER TABLE hourly ADD COLUMN` migration guard in `init_db()`.
+4. Call `_ensure_column(conn, "hourly", "new_column", "REAL")` in `init_db()` after the `CREATE TABLE` block.
 5. Add the column to `load_hourly()` query if it needs filtering (it is included by default via `SELECT *`).
 6. Add a metric card or chart in `app.py`.
 
