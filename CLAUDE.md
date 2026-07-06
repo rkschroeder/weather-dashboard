@@ -23,12 +23,13 @@
 **Daily fields stored:** `temp_max`, `temp_min`, `precipitation_sum`, `precipitation_probability_max`, `wind_speed_max`, `wind_direction_dominant`, `sunrise`, `sunset`
 
 **Dashboard UI**
-- Sidebar: Recent Cities expander (one-click reload from SQLite `locations` table), city search, geocode results picker, Fetch Weather button
+- Sidebar: Recent Cities expander (one-click reload from SQLite `locations` table), Alert Thresholds expander (editable UV/precipitation/temperature thresholds, persisted to SQLite), city search, geocode results picker, Fetch Weather button
 - Metric cards — 3 rows of 4:
   - Temperatures: Max Temp, Min Temp, Apparent Temp, Precip Probability
   - Conditions: Precipitation, Wind Speed, Wind Direction, Humidity
   - Other: Peak UV Index, Cloud Cover, Sunrise, Sunset
-- Daily summary table: Date, Conditions symbol, Max Temp, Min Temp, Precipitation, Precip Probability, Wind Speed
+- Daily summary table: Date, Conditions symbol, Max Temp, Min Temp, Precipitation, Precip Probability, Wind Speed, Peak UV — cells exceeding a threshold are highlighted
+- Threshold alerts: a warning banner lists any day/metric combination exceeding its configured threshold, above the daily summary table
 - Forecast charts (Altair, 2-column layout):
   - Temperature: shaded band + Max/Min/Feels Like lines with color legend and point markers
   - Precipitation: intensity-gradient bars (blue scale by mm)
@@ -42,13 +43,12 @@
 Potential improvements roughly in priority order:
 
 1. **Hourly forecast view** — current charts aggregate hourly data to daily; add a toggle or separate section showing true hourly detail (e.g. hourly temperature curve for today)
-2. **Threshold alerts** — highlight days in the daily table that exceed user-defined thresholds (e.g. UV > 7, precipitation > 10 mm, temperature > 35°C)
-3. **Wind chill / heat index** — derive and display alongside apparent temperature for more context
-4. **Snowfall field** — add `snowfall` and `snowfall_sum` from Open-Meteo (same extension pattern as existing fields)
-5. **CSV export** — add a download button (`st.download_button`) for the daily summary DataFrame
-6. **Multi-city comparison** — allow fetching multiple cities and overlaying them on the same chart
-7. **Deploy to Streamlit Cloud** — add `requirements.txt` export (`poetry export`) and `secrets.toml` stub, document deployment steps
-8. **Automated refresh** — schedule the pipeline via Airflow or a simple cron job so data stays fresh without manual Fetch clicks
+2. **Wind chill / heat index** — derive and display alongside apparent temperature for more context
+3. **Snowfall field** — add `snowfall` and `snowfall_sum` from Open-Meteo (same extension pattern as existing fields)
+4. **CSV export** — add a download button (`st.download_button`) for the daily summary DataFrame
+5. **Multi-city comparison** — allow fetching multiple cities and overlaying them on the same chart
+6. **Deploy to Streamlit Cloud** — add `requirements.txt` export (`poetry export`) and `secrets.toml` stub, document deployment steps
+7. **Automated refresh** — schedule the pipeline via Airflow or a simple cron job so data stays fresh without manual Fetch clicks. The threshold-alerts detection logic in `alerts.py` has no Streamlit/UI dependency by design, so a future Airflow task can reuse `detect_alerts()`'s message strings directly as an email body.
 
 ---
 
@@ -76,7 +76,7 @@ The project uses **pytest** (dev dependency). Run with:
 poetry run pytest tests/ -v
 ```
 
-59 unit tests, all passing. No external services or live network calls — HTTP is mocked via `unittest.mock.patch` and each DB-touching test uses an isolated SQLite file via the `tmp_db` fixture in `conftest.py`.
+70 unit tests, all passing. No external services or live network calls — HTTP is mocked via `unittest.mock.patch` and each DB-touching test uses an isolated SQLite file via the `tmp_db` fixture in `conftest.py`.
 
 ### Test modules
 
@@ -87,9 +87,10 @@ poetry run pytest tests/ -v
 | `tests/test_transform.py` | `parse_weather` — correct field order, empty arrays, missing key raises `ValueError` |
 | `tests/test_extract.py` | `geocode_city` / `fetch_weather` — success, fuzzy-match filter, no-results, network errors, HTTP errors |
 | `tests/test_db.py` | `init_db` — creates all 4 tables, idempotency, migration guard adds missing columns to existing DB (including `locations`) |
-| `tests/test_load.py` | `upsert_weather` — inserts rows, upsert replaces on PK conflict, label written/overwritten/skipped, location row written/skipped |
-| `tests/test_query.py` | `load_hourly` / `load_daily` / `load_location_label` / `load_location_history` — DataFrame columns, past-row filter, empty-table default, ordering, limit |
+| `tests/test_load.py` | `upsert_weather` — inserts rows, upsert replaces on PK conflict, label written/overwritten/skipped, location row written/skipped; `save_alert_thresholds` — writes and overwrites the `alert_thresholds` metadata row |
+| `tests/test_query.py` | `load_hourly` / `load_daily` / `load_location_label` / `load_location_history` — DataFrame columns, past-row filter, empty-table default, ordering, limit; `load_alert_thresholds` — defaults when unset, merges partial saved config, round-trips a full config |
 | `tests/test_pipeline.py` | `run_pipeline` — ETL call order and arguments, default label, `FetchError` propagation |
+| `tests/test_alerts.py` | `merge_uv_into_daily` — per-day peak UV merge, missing-column fallback; `detect_alerts` — strict `>` threshold comparison, message format, empty DataFrame |
 
 ### `tmp_db` fixture
 
@@ -121,10 +122,13 @@ User (browser / CLI)
                            data/weather.db  (hourly, daily, metadata, locations)
                                   │
                                   ▼
-                           query.py  →  load_hourly() / load_daily() / load_location_label() / load_location_history()
+                           query.py  →  load_hourly() / load_daily() / load_location_label() / load_location_history() / load_alert_thresholds()
                                   │
                                   ▼
                            app.py  →  metric cards, daily summary table, charts
+                                  │
+                                  ▼
+                           alerts.py  →  merge_uv_into_daily() / detect_alerts() / style_exceeding()
 ```
 
 **Key design decisions:**
@@ -132,6 +136,7 @@ User (browser / CLI)
 - Upserts are idempotent (`INSERT OR REPLACE`). Re-fetching the same location updates rows, never duplicates.
 - Streamlit reruns the full script on every interaction. SQLite is the persistence layer; no in-memory state is carried between reruns except `st.session_state`.
 - `init_db()` is idempotent and safe to call on every pipeline run or query (guarded by `_db_ready` flag).
+- `alerts.py` has zero Streamlit or DB dependency — it's pure pandas logic operating on DataFrames, so it's reusable from the UI, a script, or (in the future) an Airflow task, the same way `run_pipeline()` is.
 
 ---
 
@@ -144,9 +149,10 @@ User (browser / CLI)
 | `weather_dashboard/pipeline/__init__.py` | `run_pipeline(lat, lon, label)` — orchestrates Extract → Transform → Load |
 | `weather_dashboard/pipeline/extract.py` | Open-Meteo forecast + geocoding API calls; defines `FetchError` |
 | `weather_dashboard/pipeline/transform.py` | Parses raw API JSON into typed row tuples |
-| `weather_dashboard/pipeline/load.py` | Upserts `hourly_rows` and `daily_rows` into SQLite; writes `last_location` to metadata and city to `locations` |
+| `weather_dashboard/pipeline/load.py` | Upserts `hourly_rows` and `daily_rows` into SQLite; writes `last_location` to metadata and city to `locations`; `save_alert_thresholds()` writes threshold config to metadata |
 | `weather_dashboard/db.py` | DB connection, schema creation, `_ensure_column` migration helper |
-| `weather_dashboard/query.py` | `load_hourly()`, `load_daily()`, `load_location_label()`, `load_location_history()` — read-only from SQLite |
+| `weather_dashboard/query.py` | `load_hourly()`, `load_daily()`, `load_location_label()`, `load_location_history()`, `load_alert_thresholds()` — read-only from SQLite |
+| `weather_dashboard/alerts.py` | `merge_uv_into_daily()`, `detect_alerts()`, `style_exceeding()` — pure pandas threshold-alert logic, no Streamlit/DB dependency |
 | `weather_dashboard/utils.py` | `degrees_to_compass(degrees)` — converts wind degrees to compass label (e.g. `→ W`) |
 | `data/weather.db` | SQLite database (auto-created on first run) |
 
@@ -190,7 +196,7 @@ User (browser / CLI)
 | `key` | TEXT (PK) | — |
 | `value` | TEXT | — |
 
-Currently stores one key: `last_location` (the display label for the last fetched city, shown in the UI header).
+Stores two keys: `last_location` (the display label for the last fetched city, shown in the UI header) and `alert_thresholds` (JSON-encoded dict of threshold overrides, e.g. `{"uv_index": 7.0, "precipitation_sum": 10.0, "temp_max": 35.0}` — written by `save_alert_thresholds()`, read by `load_alert_thresholds()` which merges it over `alerts.DEFAULT_THRESHOLDS`).
 
 ### `locations` table
 
@@ -297,6 +303,21 @@ Returns up to `limit` previously fetched locations from the `locations` table, o
 ### `degrees_to_compass(degrees)`
 Converts a wind direction in degrees to a compass string with arrow prefix (e.g. `→ W`, `↗ NE`).
 
+### `load_alert_thresholds()`
+Reads the `alert_thresholds` metadata row and JSON-decodes it, merging over `alerts.DEFAULT_THRESHOLDS` so a partially-saved config still has every key. Returns `alerts.DEFAULT_THRESHOLDS` unchanged if nothing has been saved yet.
+
+### `save_alert_thresholds(thresholds: dict)`
+Writes a `{"uv_index": ..., "precipitation_sum": ..., "temp_max": ...}` dict as JSON to the `alert_thresholds` metadata row (`INSERT OR REPLACE`).
+
+### `merge_uv_into_daily(daily, hourly)`
+Adds a `uv_index` column to a copy of the daily DataFrame — the per-day max of hourly `uv_index` (same `groupby(date).agg` pattern used elsewhere in `app.py` for `cloud_cover`). Needed because UV is only stored hourly, not in the `daily` table.
+
+### `detect_alerts(daily_with_uv, thresholds)`
+Pure function: for each day and each threshold key present in both `thresholds` and the DataFrame's columns, flags values strictly greater than (`>`) the threshold. Returns a list of `{"date", "metric", "label", "value", "threshold", "message"}` dicts — the `message` string is written to render as a `st.warning()` banner in `app.py`, and is also the reusable payload a future Airflow task would forward as an email body. No Streamlit or DB import — safe to call from a script or DAG.
+
+### `style_exceeding(row, thresholds)`
+Row function passed to `pandas.Styler.apply(axis=1)` on the *rendered* daily summary DataFrame (column names like `"Max (°C)"`, not the underlying metric keys). Returns a CSS background-color string per cell that exceeds its threshold, via `alerts.DISPLAY_COLUMN_METRICS` mapping display names back to metric keys.
+
 ---
 
 ## Error Handling
@@ -319,13 +340,23 @@ Converts a wind direction in degrees to a compass string with arrow prefix (e.g.
 
 ### Layout
 
-1. **Sidebar** — Recent Cities expander (buttons for each previously fetched city, most recent first; clicking one calls `run_pipeline` directly and reruns the page), city text input, Search City button, location radio (if multiple results), Fetch Weather button.
+1. **Sidebar** — Recent Cities expander (buttons for each previously fetched city, most recent first; clicking one calls `run_pipeline` directly and reruns the page), Alert Thresholds expander (`st.form` with UV/precipitation/max-temp number inputs seeded from `load_alert_thresholds()`; Save Thresholds button calls `save_alert_thresholds()` then reruns), city text input, Search City button, location radio (if multiple results), Fetch Weather button.
 2. **Metric cards** (`st.metric`) — three rows of 4 cards:
    - *Row 1:* Max Temp, Min Temp, Apparent Temp (daily mean from hourly), Precip Probability (from `daily.precipitation_probability_max`)
    - *Row 2:* Precipitation, Wind Speed, Wind Direction, Avg Humidity (daily mean from hourly)
    - *Row 3:* Peak UV Index (daily max from hourly), Avg Cloud Cover (daily mean from hourly), Sunrise, Sunset
-3. **Daily summary table** (`st.dataframe`) — 7-row table with Date, Conditions symbol, Max Temp, Min Temp, Precipitation, Precip Probability, Wind Speed.
-4. **Forecast charts** (Altair) — three 2-column rows: Temperature + Precipitation, Wind Speed + Humidity, UV Index + Cloud Cover.
+3. **Alert banner** — one `st.warning()` per triggered threshold alert (from `alerts.detect_alerts()`), rendered above the daily summary table.
+4. **Daily summary table** (`st.dataframe`) — 7-row table with Date, Conditions symbol, Max Temp, Min Temp, Precipitation, Precip Probability, Wind Speed, Peak UV; styled with a `pandas.Styler` (`alerts.style_exceeding`) that highlights cells exceeding their threshold in amber.
+5. **Forecast charts** (Altair) — three 2-column rows: Temperature + Precipitation, Wind Speed + Humidity, UV Index + Cloud Cover.
+
+### Threshold alerts (`alerts.py`, used in `app.py`)
+
+Thresholds default to `alerts.DEFAULT_THRESHOLDS` (UV index > 7, precipitation > 10 mm, max temp > 35°C), editable via the sidebar's Alert Thresholds form and persisted to the `metadata` table (see Database Schema). On each rerun, `app.py`:
+1. Merges peak UV into the daily summary DataFrame via `merge_uv_into_daily()` (UV is hourly-only otherwise).
+2. Calls `detect_alerts()` to get triggered alerts, rendered as `st.warning()` banners above the table.
+3. Applies `style_exceeding()` as a `Styler` on the displayed DataFrame to highlight exceeding cells.
+
+Comparison is strict (`>`), matching the "exceeds" wording — a value exactly equal to its threshold does not trigger.
 
 ### Weather symbol logic (`_weather_symbol(row)` in `app.py`)
 
