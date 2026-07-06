@@ -28,3 +28,13 @@ def load_location_label() -> str:
     with closing(connect()) as conn:
         row = conn.execute("SELECT value FROM metadata WHERE key = 'last_location'").fetchone()
         return row[0] if row else ""
+
+
+def load_location_history(limit: int = 10) -> list[dict]:
+    init_db()
+    with closing(connect()) as conn:
+        rows = conn.execute(
+            "SELECT label, lat, lon FROM locations ORDER BY last_fetched DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return [{"label": r[0], "lat": r[1], "lon": r[2]} for r in rows]

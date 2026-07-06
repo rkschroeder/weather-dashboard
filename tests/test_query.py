@@ -5,7 +5,7 @@ import pytest
 
 from weather_dashboard.db import init_db
 from weather_dashboard.pipeline.load import upsert_weather
-from weather_dashboard.query import load_daily, load_hourly, load_location_label
+from weather_dashboard.query import load_daily, load_hourly, load_location_label, load_location_history
 
 
 # Rows dated far in the future so they are always "upcoming" relative to today
@@ -69,3 +69,34 @@ def test_load_location_label_returns_stored_value(tmp_db):
 def test_load_location_label_returns_empty_string_when_not_set(tmp_db):
     init_db()
     assert load_location_label() == ""
+
+
+def test_load_location_history_returns_locations(tmp_db):
+    init_db()
+    # Insert with explicit timestamps — datetime('now') resolves to the second,
+    # making two back-to-back inserts non-deterministically ordered otherwise
+    import sqlite3
+    from contextlib import closing as _closing
+    with _closing(sqlite3.connect(tmp_db)) as conn:
+        conn.execute("INSERT INTO locations (label, lat, lon, last_fetched) VALUES (?,?,?,?)",
+                     ("Berlin, Germany", 52.5, 13.4, "2024-01-01 10:00:00"))
+        conn.execute("INSERT INTO locations (label, lat, lon, last_fetched) VALUES (?,?,?,?)",
+                     ("Paris, France", 48.8, 2.3, "2024-01-02 10:00:00"))
+        conn.commit()
+    history = load_location_history()
+    assert len(history) == 2
+    assert history[0]["label"] == "Paris, France"  # most recent first
+    assert history[1]["label"] == "Berlin, Germany"
+    assert {"label", "lat", "lon"} == set(history[0].keys())
+
+
+def test_load_location_history_empty(tmp_db):
+    init_db()
+    assert load_location_history() == []
+
+
+def test_load_location_history_respects_limit(tmp_db):
+    init_db()
+    for i in range(5):
+        upsert_weather(FUTURE_HOURLY, FUTURE_DAILY, lat=float(i), lon=float(i), label=f"City {i}")
+    assert len(load_location_history(limit=3)) == 3

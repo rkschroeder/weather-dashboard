@@ -23,7 +23,7 @@ def test_run_pipeline_calls_etl_in_order(mock_init, mock_fetch, mock_parse, mock
     mock_init.assert_called_once()
     mock_fetch.assert_called_once_with(52.5, 13.4)
     mock_parse.assert_called_once_with(SAMPLE_API_PAYLOAD)
-    mock_upsert.assert_called_once_with(HOURLY_ROWS, DAILY_ROWS, label="Berlin")
+    mock_upsert.assert_called_once_with(HOURLY_ROWS, DAILY_ROWS, lat=52.5, lon=13.4, label="Berlin")
 
 
 @patch("weather_dashboard.pipeline.upsert_weather")
@@ -36,7 +36,7 @@ def test_run_pipeline_default_label_is_empty(mock_init, mock_fetch, mock_parse, 
 
     run_pipeline(52.5, 13.4)
 
-    mock_upsert.assert_called_once_with(HOURLY_ROWS, DAILY_ROWS, label="")
+    mock_upsert.assert_called_once_with(HOURLY_ROWS, DAILY_ROWS, lat=52.5, lon=13.4, label="")
 
 
 @patch("weather_dashboard.pipeline.fetch_weather")

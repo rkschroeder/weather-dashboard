@@ -68,3 +68,32 @@ def test_upsert_label_can_be_overwritten(tmp_db):
     upsert_weather(HOURLY_ROWS, DAILY_ROWS, label="Paris")
     rows = _fetch_all(tmp_db, "SELECT value FROM metadata WHERE key = 'last_location'")
     assert rows[0][0] == "Paris"
+
+
+def test_upsert_inserts_location_row(tmp_db):
+    init_db()
+    upsert_weather(HOURLY_ROWS, DAILY_ROWS, lat=52.5, lon=13.4, label="Berlin, Germany")
+    rows = _fetch_all(tmp_db, "SELECT label, lat, lon FROM locations")
+    assert rows == [("Berlin, Germany", 52.5, 13.4)]
+
+
+def test_upsert_location_replaces_on_conflict(tmp_db):
+    init_db()
+    upsert_weather(HOURLY_ROWS, DAILY_ROWS, lat=52.5, lon=13.4, label="Berlin, Germany")
+    upsert_weather(HOURLY_ROWS, DAILY_ROWS, lat=52.5, lon=13.4, label="Berlin, Germany")
+    rows = _fetch_all(tmp_db, "SELECT label FROM locations")
+    assert len(rows) == 1
+
+
+def test_upsert_no_location_row_without_label(tmp_db):
+    init_db()
+    upsert_weather(HOURLY_ROWS, DAILY_ROWS, lat=52.5, lon=13.4, label="")
+    rows = _fetch_all(tmp_db, "SELECT label FROM locations")
+    assert rows == []
+
+
+def test_upsert_no_location_row_without_coords(tmp_db):
+    init_db()
+    upsert_weather(HOURLY_ROWS, DAILY_ROWS, label="Berlin, Germany")
+    rows = _fetch_all(tmp_db, "SELECT label FROM locations")
+    assert rows == []

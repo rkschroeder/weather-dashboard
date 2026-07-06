@@ -16,7 +16,7 @@ def test_init_db_creates_all_tables(tmp_db):
     init_db()
     with closing(sqlite3.connect(tmp_db)) as conn:
         tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
-    assert {"hourly", "daily", "metadata"} <= tables
+    assert {"hourly", "daily", "metadata", "locations"} <= tables
 
 
 def test_init_db_hourly_columns(tmp_db):
@@ -66,3 +66,24 @@ def test_init_db_migration_adds_missing_column(tmp_db, monkeypatch):
     assert "uv_index" in cols
     assert "cloud_cover" in cols
     assert "precipitation_probability" in cols
+
+
+def test_init_db_locations_columns(tmp_db):
+    init_db()
+    cols = _get_columns(tmp_db, "locations")
+    assert {"label", "lat", "lon", "last_fetched"} <= cols
+
+
+def test_init_db_locations_migration_adds_last_fetched(tmp_db, monkeypatch):
+    # Simulate a locations table created before last_fetched was added
+    with closing(sqlite3.connect(tmp_db)) as conn:
+        conn.execute("CREATE TABLE hourly (time TEXT PRIMARY KEY, temperature_2m REAL)")
+        conn.execute("CREATE TABLE daily (date TEXT PRIMARY KEY, temp_max REAL)")
+        conn.execute("CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT)")
+        conn.execute("CREATE TABLE locations (label TEXT PRIMARY KEY, lat REAL, lon REAL)")
+        conn.commit()
+
+    monkeypatch.setattr(db_module, "_db_ready", False)
+    init_db()
+
+    assert "last_fetched" in _get_columns(tmp_db, "locations")

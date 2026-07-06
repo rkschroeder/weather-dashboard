@@ -2,7 +2,13 @@ from contextlib import closing
 from weather_dashboard.db import connect
 
 
-def upsert_weather(hourly_rows: list[tuple], daily_rows: list[tuple], label: str = "") -> None:
+def upsert_weather(
+    hourly_rows: list[tuple],
+    daily_rows: list[tuple],
+    lat: float | None = None,
+    lon: float | None = None,
+    label: str = "",
+) -> None:
     with closing(connect()) as conn:
         with conn:
             conn.executemany(
@@ -17,4 +23,9 @@ def upsert_weather(hourly_rows: list[tuple], daily_rows: list[tuple], label: str
                 conn.execute(
                     "INSERT OR REPLACE INTO metadata (key, value) VALUES ('last_location', ?)",
                     (label,),
+                )
+            if label and lat is not None and lon is not None:
+                conn.execute(
+                    "INSERT OR REPLACE INTO locations (label, lat, lon, last_fetched) VALUES (?, ?, ?, datetime('now'))",
+                    (label, lat, lon),
                 )
