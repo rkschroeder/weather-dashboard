@@ -56,7 +56,7 @@ def detect_alerts(daily_with_uv: pd.DataFrame, thresholds: dict) -> list[dict]:
                 "label": label,
                 "value": value,
                 "threshold": threshold,
-                "message": f"{date_str}: {label} {value:.1f} exceeds threshold of {threshold:.1f}",
+                "message": f"{date_str}: {label} {value:.0f} exceeds threshold of {threshold:.0f}",
             })
     return alerts
 

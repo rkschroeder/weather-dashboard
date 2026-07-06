@@ -11,7 +11,7 @@ from weather_dashboard.query import (
     load_location_history,
     load_alert_thresholds,
 )
-from weather_dashboard.utils import degrees_to_compass
+from weather_dashboard.utils import degrees_to_compass, format_relative_time
 
 st.set_page_config(
     page_title="Weather Dashboard",
@@ -55,15 +55,24 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── Sidebar ──────────────────────────────────────────────────────────────────
+current_label = load_location_label()
+
 with st.sidebar:
     st.markdown("## 📍 Location")
     st.divider()
 
     history = load_location_history()
     if history:
-        with st.expander("Recent Cities", expanded=True):
+        with st.expander("Recent Cities", expanded=not current_label):
             for loc in history:
-                if st.button(loc["label"], key=f"hist_{loc['label']}", use_container_width=True):
+                is_active = loc["label"] == current_label
+                if st.button(
+                    f"📍 {loc['label']}" if is_active else loc["label"],
+                    key=f"hist_{loc['label']}",
+                    use_container_width=True,
+                    disabled=is_active,
+                    type="primary" if is_active else "secondary",
+                ):
                     with st.spinner(f"Fetching weather for {loc['label']}..."):
                         try:
                             run_pipeline(loc["lat"], loc["lon"], label=loc["label"])
@@ -71,26 +80,42 @@ with st.sidebar:
                             st.error(str(e))
                             st.stop()
                     st.rerun()
+                st.caption(f"Last fetched {format_relative_time(loc['last_fetched'])}")
         st.divider()
 
     current_thresholds = load_alert_thresholds()
+    threshold_summary = (
+        f"UV > {current_thresholds['uv_index']:.0f} · "
+        f"Precip > {current_thresholds['precipitation_sum']:.0f}mm · "
+        f"Temp > {current_thresholds['temp_max']:.0f}°C"
+    )
     with st.expander("⚠️ Alert Thresholds"):
+        st.caption(threshold_summary)
         with st.form("threshold_form"):
             uv_threshold = st.number_input(
-                "Peak UV Index above", value=float(current_thresholds["uv_index"]), min_value=0.0, step=0.5
+                "Peak UV Index above", value=float(current_thresholds["uv_index"]), min_value=0.0, step=1.0,
+                format="%.0f", help="Warn when a day's peak UV index exceeds this value.",
             )
             precip_threshold = st.number_input(
-                "Precipitation (mm) above", value=float(current_thresholds["precipitation_sum"]), min_value=0.0, step=0.5
+                "Precipitation (mm) above", value=float(current_thresholds["precipitation_sum"]), min_value=0.0, step=1.0,
+                format="%.0f", help="Warn when a day's total precipitation exceeds this many millimeters.",
             )
             temp_threshold = st.number_input(
-                "Max Temp (°C) above", value=float(current_thresholds["temp_max"]), min_value=0.0, step=0.5
+                "Max Temp (°C) above", value=float(current_thresholds["temp_max"]), min_value=0.0, step=1.0,
+                format="%.0f", help="Warn when a day's max temperature exceeds this value.",
             )
-            if st.form_submit_button("Save Thresholds", use_container_width=True):
+            col_save, col_reset = st.columns(2)
+            save_clicked = col_save.form_submit_button("Save", use_container_width=True, type="primary")
+            reset_clicked = col_reset.form_submit_button("Reset", use_container_width=True)
+            if save_clicked:
                 save_alert_thresholds({
                     "uv_index": uv_threshold,
                     "precipitation_sum": precip_threshold,
                     "temp_max": temp_threshold,
                 })
+                st.rerun()
+            if reset_clicked:
+                save_alert_thresholds(dict(alerts.DEFAULT_THRESHOLDS))
                 st.rerun()
     st.divider()
 
@@ -182,7 +207,23 @@ if daily.empty:
     st.stop()
 
 location_label = load_location_label() or city
-st.caption(f"Showing forecast for **{location_label}**")
+current_loc = next((h for h in history if h["label"] == current_label), None)
+
+header_col, refresh_col = st.columns([5, 1])
+with header_col:
+    caption = f"Showing forecast for **{location_label}**"
+    if current_loc and current_loc.get("last_fetched"):
+        caption += f" · updated {format_relative_time(current_loc['last_fetched'])}"
+    st.caption(caption)
+with refresh_col:
+    if current_loc and st.button("🔄 Refresh", use_container_width=True):
+        with st.spinner(f"Refreshing {location_label}..."):
+            try:
+                run_pipeline(current_loc["lat"], current_loc["lon"], label=location_label)
+            except (ValueError, FetchError) as e:
+                st.error(str(e))
+                st.stop()
+        st.rerun()
 st.divider()
 
 # ── Today's metrics ───────────────────────────────────────────────────────────
@@ -241,7 +282,23 @@ if "sunrise" in today.index and pd.notna(today["sunrise"]):
 st.divider()
 
 # ── Daily Summary table ────────────────────────────────────────────────────────
-st.subheader("📋 Daily Summary")
+CONDITION_SYMBOLS = [
+    ("🌧️", "Heavy rain", "Precipitation ≥ 5 mm"),
+    ("🌦️", "Light rain", "Precipitation ≥ 0.5 mm"),
+    ("☀️", "Sunny", "Cloud cover < 25% (or no data)"),
+    ("⛅", "Partly cloudy", "Cloud cover 25–59%"),
+    ("☁️", "Cloudy", "Cloud cover ≥ 60%"),
+]
+
+summary_header_col, legend_col = st.columns([5, 1])
+with summary_header_col:
+    st.subheader("📋 Weekly Summary")
+with legend_col:
+    with st.popover("ℹ️ Symbols", use_container_width=True):
+        st.markdown("**What the conditions symbols mean:**")
+        for symbol, label, rule in CONDITION_SYMBOLS:
+            st.markdown(f"{symbol} &nbsp;**{label}** — {rule}")
+
 summary = daily.copy()
 
 # Derive per-day avg cloud cover for the weather symbol
@@ -260,19 +317,20 @@ thresholds = load_alert_thresholds()
 triggered_alerts = alerts.detect_alerts(summary, thresholds)
 
 def _weather_symbol(row):
+    # Precipitation takes priority over cloud cover — see CONDITION_SYMBOLS order.
     precip = row["precipitation_sum"] or 0
     cloud = row["cloud_cover"]
     if precip >= 5:
-        return "🌧️"
+        return CONDITION_SYMBOLS[0][0]
     if precip >= 0.5:
-        return "🌦️"
+        return CONDITION_SYMBOLS[1][0]
     if cloud is None or pd.isna(cloud):
-        return "☀️"
+        return CONDITION_SYMBOLS[2][0]
     if cloud < 25:
-        return "☀️"
+        return CONDITION_SYMBOLS[2][0]
     if cloud < 60:
-        return "⛅"
-    return "☁️"
+        return CONDITION_SYMBOLS[3][0]
+    return CONDITION_SYMBOLS[4][0]
 
 summary["conditions"] = summary.apply(_weather_symbol, axis=1)
 summary["date"] = summary["date"].dt.strftime("%a %d")
@@ -289,14 +347,39 @@ display_cols = {
 }
 visible_cols = {k: v for k, v in display_cols.items() if k in summary.columns}
 
-for alert in triggered_alerts:
-    st.warning(alert["message"])
+NUMERIC_COLUMN_HELP = {
+    "Max (°C)": "Daily maximum temperature",
+    "Min (°C)": "Daily minimum temperature",
+    "Precip (mm)": "Total precipitation for the day",
+    "Precip Prob (%)": "Maximum hourly precipitation probability",
+    "Wind (km/h)": "Maximum wind speed for the day",
+    "Peak UV": "Peak hourly UV index for the day",
+}
+summary_column_config = {
+    "Date": st.column_config.TextColumn("Date", pinned=True),
+    "Conditions": st.column_config.TextColumn("Conditions", width="small"),
+}
+for col_label, help_text in NUMERIC_COLUMN_HELP.items():
+    if col_label in visible_cols.values():
+        summary_column_config[col_label] = st.column_config.NumberColumn(
+            col_label, help=help_text, format="%.0f"
+        )
+
+if triggered_alerts:
+    count = len(triggered_alerts)
+    st.warning(
+        f"**⚠️ {count} threshold alert{'s' if count != 1 else ''}:**\n\n"
+        + "\n".join(f"- {alert['message']}" for alert in triggered_alerts)
+    )
+else:
+    st.success("✅ No thresholds exceeded this week.")
 
 st.dataframe(
     summary[list(visible_cols)].rename(columns=visible_cols)
         .style.apply(alerts.style_exceeding, thresholds=thresholds, axis=1),
     use_container_width=True,
     hide_index=True,
+    column_config=summary_column_config,
 )
 
 st.divider()

@@ -36,10 +36,10 @@ def load_location_history(limit: int = 10) -> list[dict]:
     init_db()
     with closing(connect()) as conn:
         rows = conn.execute(
-            "SELECT label, lat, lon FROM locations ORDER BY last_fetched DESC LIMIT ?",
+            "SELECT label, lat, lon, last_fetched FROM locations ORDER BY last_fetched DESC LIMIT ?",
             (limit,),
         ).fetchall()
-    return [{"label": r[0], "lat": r[1], "lon": r[2]} for r in rows]
+    return [{"label": r[0], "lat": r[1], "lon": r[2], "last_fetched": r[3]} for r in rows]
 
 
 def load_alert_thresholds() -> dict:
