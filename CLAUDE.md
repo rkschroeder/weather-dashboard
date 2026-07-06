@@ -23,13 +23,14 @@
 **Daily fields stored:** `temp_max`, `temp_min`, `precipitation_sum`, `precipitation_probability_max`, `wind_speed_max`, `wind_direction_dominant`, `sunrise`, `sunset`
 
 **Dashboard UI**
-- Sidebar: Recent Cities expander (one-click reload from SQLite `locations` table), Alert Thresholds expander (editable UV/precipitation/temperature thresholds, persisted to SQLite), city search, geocode results picker, Fetch Weather button
+- Sidebar: Recent Cities expander (one-click reload from SQLite `locations` table; pinned/disabled button + "last fetched" relative-time caption for the active city), Alert Thresholds expander (editable UV/precipitation/temperature thresholds, persisted to SQLite, displayed and edited as whole numbers; collapsed summary caption; Reset-to-defaults button), city search, geocode results picker, Fetch Weather button
+- Header row: current location + last-updated relative-time caption, with a Refresh button to re-fetch the active location
 - Metric cards — 3 rows of 4:
   - Temperatures: Max Temp, Min Temp, Apparent Temp, Precip Probability
   - Conditions: Precipitation, Wind Speed, Wind Direction, Humidity
   - Other: Peak UV Index, Cloud Cover, Sunrise, Sunset
-- Daily summary table: Date, Conditions symbol, Max Temp, Min Temp, Precipitation, Precip Probability, Wind Speed, Peak UV — cells exceeding a threshold are highlighted
-- Threshold alerts: a warning banner lists any day/metric combination exceeding its configured threshold, above the daily summary table
+- Weekly Summary table: Date, Conditions symbol, Max Temp, Min Temp, Precipitation, Precip Probability, Wind Speed, Peak UV — cells exceeding a threshold are highlighted. **All numeric columns are rounded to whole numbers for display** (via `column_config`'s `%.0f` format); the underlying stored values and threshold comparisons retain full precision. An info popover next to the table header explains what each conditions symbol means.
+- Threshold alerts: a single grouped warning banner lists all triggered day/metric combinations (or a success message if none are triggered), above the Weekly Summary table. Alert messages also round values to whole numbers, matching the table and the threshold inputs.
 - Forecast charts (Altair, 2-column layout):
   - Temperature: shaded band + Max/Min/Feels Like lines with color legend and point markers
   - Precipitation: intensity-gradient bars (blue scale by mm)
@@ -76,7 +77,7 @@ The project uses **pytest** (dev dependency). Run with:
 poetry run pytest tests/ -v
 ```
 
-70 unit tests, all passing. No external services or live network calls — HTTP is mocked via `unittest.mock.patch` and each DB-touching test uses an isolated SQLite file via the `tmp_db` fixture in `conftest.py`.
+75 unit tests, all passing. No external services or live network calls — HTTP is mocked via `unittest.mock.patch` and each DB-touching test uses an isolated SQLite file via the `tmp_db` fixture in `conftest.py`.
 
 ### Test modules
 
@@ -125,7 +126,7 @@ User (browser / CLI)
                            query.py  →  load_hourly() / load_daily() / load_location_label() / load_location_history() / load_alert_thresholds()
                                   │
                                   ▼
-                           app.py  →  metric cards, daily summary table, charts
+                           app.py  →  metric cards, weekly summary table, charts
                                   │
                                   ▼
                            alerts.py  →  merge_uv_into_daily() / detect_alerts() / style_exceeding()
@@ -145,7 +146,7 @@ User (browser / CLI)
 | File | Purpose |
 |------|---------|
 | `run_pipeline.py` | Developer CLI — geocodes a city and runs the full pipeline without the Streamlit app |
-| `weather_dashboard/app.py` | Streamlit UI — sidebar, metric cards, daily summary table, Altair charts |
+| `weather_dashboard/app.py` | Streamlit UI — sidebar, metric cards, weekly summary table, Altair charts |
 | `weather_dashboard/pipeline/__init__.py` | `run_pipeline(lat, lon, label)` — orchestrates Extract → Transform → Load |
 | `weather_dashboard/pipeline/extract.py` | Open-Meteo forecast + geocoding API calls; defines `FetchError` |
 | `weather_dashboard/pipeline/transform.py` | Parses raw API JSON into typed row tuples |
@@ -316,7 +317,7 @@ Adds a `uv_index` column to a copy of the daily DataFrame — the per-day max of
 Pure function: for each day and each threshold key present in both `thresholds` and the DataFrame's columns, flags values strictly greater than (`>`) the threshold. Returns a list of `{"date", "metric", "label", "value", "threshold", "message"}` dicts — the `message` string is written to render as a `st.warning()` banner in `app.py`, and is also the reusable payload a future Airflow task would forward as an email body. No Streamlit or DB import — safe to call from a script or DAG.
 
 ### `style_exceeding(row, thresholds)`
-Row function passed to `pandas.Styler.apply(axis=1)` on the *rendered* daily summary DataFrame (column names like `"Max (°C)"`, not the underlying metric keys). Returns a CSS background-color string per cell that exceeds its threshold, via `alerts.DISPLAY_COLUMN_METRICS` mapping display names back to metric keys.
+Row function passed to `pandas.Styler.apply(axis=1)` on the *rendered* Weekly Summary DataFrame (column names like `"Max (°C)"`, not the underlying metric keys). Returns a CSS background-color string per cell that exceeds its threshold, via `alerts.DISPLAY_COLUMN_METRICS` mapping display names back to metric keys. Applied to the unrounded value — the whole-number display is a separate `column_config` concern (see Number formatting).
 
 ---
 
@@ -340,27 +341,32 @@ Row function passed to `pandas.Styler.apply(axis=1)` on the *rendered* daily sum
 
 ### Layout
 
-1. **Sidebar** — Recent Cities expander (buttons for each previously fetched city, most recent first; clicking one calls `run_pipeline` directly and reruns the page), Alert Thresholds expander (`st.form` with UV/precipitation/max-temp number inputs seeded from `load_alert_thresholds()`; Save Thresholds button calls `save_alert_thresholds()` then reruns), city text input, Search City button, location radio (if multiple results), Fetch Weather button.
-2. **Metric cards** (`st.metric`) — three rows of 4 cards:
+1. **Sidebar** — Recent Cities expander (collapsed once a forecast is loaded; buttons for each previously fetched city, most recent first, with the active city shown pinned/disabled and a "last fetched" relative-time caption under each entry; clicking one calls `run_pipeline` directly and reruns the page), Alert Thresholds expander (collapsed summary caption of current values; `st.form` with UV/precipitation/max-temp number inputs — whole numbers only, `format="%.0f"`, `step=1.0` — seeded from `load_alert_thresholds()`; Save button calls `save_alert_thresholds()`, Reset button restores `alerts.DEFAULT_THRESHOLDS`, both rerun), city text input, Search City button, location radio (if multiple results), Fetch Weather button.
+2. **Header row** — "Showing forecast for **{location}** · updated {relative time}" caption plus a Refresh button that re-runs the pipeline for the currently loaded location.
+3. **Metric cards** (`st.metric`) — three rows of 4 cards:
    - *Row 1:* Max Temp, Min Temp, Apparent Temp (daily mean from hourly), Precip Probability (from `daily.precipitation_probability_max`)
    - *Row 2:* Precipitation, Wind Speed, Wind Direction, Avg Humidity (daily mean from hourly)
    - *Row 3:* Peak UV Index (daily max from hourly), Avg Cloud Cover (daily mean from hourly), Sunrise, Sunset
-3. **Alert banner** — one `st.warning()` per triggered threshold alert (from `alerts.detect_alerts()`), rendered above the daily summary table.
-4. **Daily summary table** (`st.dataframe`) — 7-row table with Date, Conditions symbol, Max Temp, Min Temp, Precipitation, Precip Probability, Wind Speed, Peak UV; styled with a `pandas.Styler` (`alerts.style_exceeding`) that highlights cells exceeding their threshold in amber.
-5. **Forecast charts** (Altair) — three 2-column rows: Temperature + Precipitation, Wind Speed + Humidity, UV Index + Cloud Cover.
+4. **Alert banner** — a single grouped `st.warning()` listing every triggered threshold alert (from `alerts.detect_alerts()`), or an `st.success()` message when none are triggered; rendered above the Weekly Summary table, next to an info popover explaining the conditions symbols (`CONDITION_SYMBOLS` in `app.py`).
+5. **Weekly Summary table** (`st.dataframe`) — 7-row table with Date, Conditions symbol, Max Temp, Min Temp, Precipitation, Precip Probability, Wind Speed, Peak UV; styled with a `pandas.Styler` (`alerts.style_exceeding`) that highlights cells exceeding their threshold in amber, plus `column_config` (`st.column_config.NumberColumn(..., format="%.0f")`) that **rounds every numeric column to a whole number for display** and adds a help tooltip per column; the Date column is pinned.
+6. **Forecast charts** (Altair) — three 2-column rows: Temperature + Precipitation, Wind Speed + Humidity, UV Index + Cloud Cover.
+
+### Number formatting
+
+Numbers shown in the Alert Thresholds inputs/summary, the alert banner messages, and the Weekly Summary table are **rounded to the nearest whole number** for display (`%.0f`-style formatting) — e.g. a stored value of `9.2` renders as `9`. This is presentation-only: the underlying SQLite/DataFrame values keep full precision, and threshold comparisons in `detect_alerts()` and `style_exceeding()` always operate on the unrounded value. Metric cards and charts elsewhere in `app.py` are unaffected and keep their existing 1-decimal/0-decimal formatting.
 
 ### Threshold alerts (`alerts.py`, used in `app.py`)
 
-Thresholds default to `alerts.DEFAULT_THRESHOLDS` (UV index > 7, precipitation > 10 mm, max temp > 35°C), editable via the sidebar's Alert Thresholds form and persisted to the `metadata` table (see Database Schema). On each rerun, `app.py`:
+Thresholds default to `alerts.DEFAULT_THRESHOLDS` (UV index > 7, precipitation > 10 mm, max temp > 35°C), editable via the sidebar's Alert Thresholds form (whole numbers only) and persisted to the `metadata` table (see Database Schema). On each rerun, `app.py`:
 1. Merges peak UV into the daily summary DataFrame via `merge_uv_into_daily()` (UV is hourly-only otherwise).
-2. Calls `detect_alerts()` to get triggered alerts, rendered as `st.warning()` banners above the table.
-3. Applies `style_exceeding()` as a `Styler` on the displayed DataFrame to highlight exceeding cells.
+2. Calls `detect_alerts()` to get triggered alerts, rendered as a single grouped `st.warning()` above the table (or `st.success()` if empty). Alert messages round both the value and threshold to whole numbers.
+3. Applies `style_exceeding()` as a `Styler` on the displayed DataFrame to highlight exceeding cells; `column_config` separately rounds the displayed numbers (formatting from `column_config` always takes precedence over `Styler` formatting).
 
 Comparison is strict (`>`), matching the "exceeds" wording — a value exactly equal to its threshold does not trigger.
 
 ### Weather symbol logic (`_weather_symbol(row)` in `app.py`)
 
-Derives a conditions emoji for the daily summary table from `precipitation_sum` and avg `cloud_cover` (merged from hourly via a `groupby` before rendering). **Precipitation takes priority over cloud cover:**
+Derives a conditions emoji for the Weekly Summary table from `precipitation_sum` and avg `cloud_cover` (merged from hourly via a `groupby` before rendering), pulling each symbol from the shared `CONDITION_SYMBOLS` list so the table and its info popover legend can't drift out of sync. **Precipitation takes priority over cloud cover:**
 
 | Symbol | Condition | Rule |
 |--------|-----------|------|
