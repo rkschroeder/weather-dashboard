@@ -1,3 +1,4 @@
+import json
 from contextlib import closing
 from weather_dashboard.db import connect
 
@@ -29,3 +30,12 @@ def upsert_weather(
                     "INSERT OR REPLACE INTO locations (label, lat, lon, last_fetched) VALUES (?, ?, ?, datetime('now'))",
                     (label, lat, lon),
                 )
+
+
+def save_alert_thresholds(thresholds: dict) -> None:
+    with closing(connect()) as conn:
+        with conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO metadata (key, value) VALUES ('alert_thresholds', ?)",
+                (json.dumps(thresholds),),
+            )

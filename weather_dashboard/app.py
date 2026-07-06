@@ -1,9 +1,16 @@
 import altair as alt
 import pandas as pd
 import streamlit as st
+from weather_dashboard import alerts
 from weather_dashboard.pipeline.extract import geocode_city
-from weather_dashboard.pipeline import run_pipeline, FetchError
-from weather_dashboard.query import load_hourly, load_daily, load_location_label, load_location_history
+from weather_dashboard.pipeline import run_pipeline, FetchError, save_alert_thresholds
+from weather_dashboard.query import (
+    load_hourly,
+    load_daily,
+    load_location_label,
+    load_location_history,
+    load_alert_thresholds,
+)
 from weather_dashboard.utils import degrees_to_compass
 
 st.set_page_config(
@@ -65,6 +72,27 @@ with st.sidebar:
                             st.stop()
                     st.rerun()
         st.divider()
+
+    current_thresholds = load_alert_thresholds()
+    with st.expander("⚠️ Alert Thresholds"):
+        with st.form("threshold_form"):
+            uv_threshold = st.number_input(
+                "Peak UV Index above", value=float(current_thresholds["uv_index"]), min_value=0.0, step=0.5
+            )
+            precip_threshold = st.number_input(
+                "Precipitation (mm) above", value=float(current_thresholds["precipitation_sum"]), min_value=0.0, step=0.5
+            )
+            temp_threshold = st.number_input(
+                "Max Temp (°C) above", value=float(current_thresholds["temp_max"]), min_value=0.0, step=0.5
+            )
+            if st.form_submit_button("Save Thresholds", use_container_width=True):
+                save_alert_thresholds({
+                    "uv_index": uv_threshold,
+                    "precipitation_sum": precip_threshold,
+                    "temp_max": temp_threshold,
+                })
+                st.rerun()
+    st.divider()
 
     city = st.text_input("City name", value="Berlin", placeholder="e.g. Berlin, Tokyo, New York")
 
@@ -227,6 +255,10 @@ if "cloud_cover" in hourly.columns:
 else:
     summary["cloud_cover"] = None
 
+summary = alerts.merge_uv_into_daily(summary, hourly)
+thresholds = load_alert_thresholds()
+triggered_alerts = alerts.detect_alerts(summary, thresholds)
+
 def _weather_symbol(row):
     precip = row["precipitation_sum"] or 0
     cloud = row["cloud_cover"]
@@ -253,10 +285,16 @@ display_cols = {
     "precipitation_sum": "Precip (mm)",
     "precipitation_probability_max": "Precip Prob (%)",
     "wind_speed_max": "Wind (km/h)",
+    "uv_index": "Peak UV",
 }
 visible_cols = {k: v for k, v in display_cols.items() if k in summary.columns}
+
+for alert in triggered_alerts:
+    st.warning(alert["message"])
+
 st.dataframe(
-    summary[list(visible_cols)].rename(columns=visible_cols),
+    summary[list(visible_cols)].rename(columns=visible_cols)
+        .style.apply(alerts.style_exceeding, thresholds=thresholds, axis=1),
     use_container_width=True,
     hide_index=True,
 )

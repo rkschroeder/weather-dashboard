@@ -2,11 +2,11 @@ import logging
 from weather_dashboard.db import init_db
 from weather_dashboard.pipeline.extract import fetch_weather, FetchError
 from weather_dashboard.pipeline.transform import parse_weather
-from weather_dashboard.pipeline.load import upsert_weather
+from weather_dashboard.pipeline.load import upsert_weather, save_alert_thresholds
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["run_pipeline", "FetchError"]
+__all__ = ["run_pipeline", "FetchError", "save_alert_thresholds"]
 
 
 def run_pipeline(latitude: float, longitude: float, label: str = "") -> None:

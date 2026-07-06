@@ -6,7 +6,8 @@ A 7-day weather forecast dashboard built with Streamlit, powered by the [Open-Me
 
 - Search by city name with persistent location history — previously fetched cities appear as one-click buttons in the sidebar
 - Today's metrics as live cards: max/min temperature, apparent temperature (feels like), precipitation probability, precipitation, wind speed & direction (e.g. `→ W`), humidity, UV index, cloud cover, sunrise, and sunset
-- Daily summary table: date, conditions symbol, max/min temperature, precipitation, precipitation probability, and wind speed
+- Daily summary table: date, conditions symbol, max/min temperature, precipitation, precipitation probability, wind speed, and peak UV
+- **Threshold alerts** — configurable UV, precipitation, and max-temperature thresholds (sidebar form, persisted to SQLite); days that exceed a threshold are highlighted in the table and listed in a warning banner
 - 7-day forecast charts for temperature (with feels-like line), precipitation, wind speed, humidity, UV index, and cloud cover
 - Data persisted in a local SQLite database
 
@@ -43,8 +44,14 @@ After the first fetch, the dashboard shows three sections:
   - *Row 1:* Max Temp, Min Temp, Apparent Temp (feels like), Precip Probability
   - *Row 2:* Precipitation, Wind Speed, Wind Direction, Humidity
   - *Row 3:* Peak UV Index, Avg Cloud Cover, Sunrise, Sunset
-- **Daily summary table** — a compact overview of the week: Date, Conditions, Max Temp, Min Temp, Precipitation, Precip Probability, Wind Speed.
+- **Daily summary table** — a compact overview of the week: Date, Conditions, Max Temp, Min Temp, Precipitation, Precip Probability, Wind Speed, Peak UV. Cells exceeding a configured threshold are highlighted in amber.
 - **Forecast charts** — 7-day charts for temperature (max, min, feels like), precipitation, wind speed, humidity, UV index, and cloud cover.
+
+### Threshold Alerts
+
+The sidebar's **Alert Thresholds** expander lets you set thresholds for peak UV index, daily precipitation (mm), and max temperature (°C) — defaults are UV > 7, precipitation > 10 mm, and max temp > 35°C. Saved thresholds persist across restarts (stored in SQLite). Any day whose value strictly exceeds its threshold:
+- shows up in a warning banner above the daily summary table (e.g. "Wed 09: Peak UV Index 9.2 exceeds threshold of 7.0"), and
+- has its cell highlighted amber in the table.
 
 ### Conditions Symbol
 
@@ -60,7 +67,7 @@ The **Conditions** symbol in the daily summary table is derived from avg daily c
 
 ## Testing
 
-The project includes a unit test suite (59 tests) covering all pipeline modules. No external services or live network calls are required — HTTP calls are mocked and each test gets an isolated SQLite database via a `tmp_db` fixture.
+The project includes a unit test suite (70 tests) covering all pipeline modules. No external services or live network calls are required — HTTP calls are mocked and each test gets an isolated SQLite database via a `tmp_db` fixture.
 
 ```bash
 poetry run pytest tests/ -v
@@ -72,9 +79,10 @@ poetry run pytest tests/ -v
 | `test_transform.py` | `parse_weather` — field order, empty arrays, missing key errors |
 | `test_extract.py` | `geocode_city` / `fetch_weather` — success paths, fuzzy-match filtering, network errors, HTTP errors |
 | `test_db.py` | `init_db` — table creation (all 4 tables), idempotency, migration guard for missing columns including `locations` |
-| `test_load.py` | `upsert_weather` — inserts, upsert conflict replacement, metadata label writes, location row written/skipped |
-| `test_query.py` | `load_hourly` / `load_daily` / `load_location_label` / `load_location_history` — DataFrame shape, past-row filter, ordering, limit, empty-table default |
+| `test_load.py` | `upsert_weather` — inserts, upsert conflict replacement, metadata label writes, location row written/skipped; `save_alert_thresholds` — writes/overwrites the threshold config |
+| `test_query.py` | `load_hourly` / `load_daily` / `load_location_label` / `load_location_history` — DataFrame shape, past-row filter, ordering, limit, empty-table default; `load_alert_thresholds` — defaults, partial merge, round-trip |
 | `test_pipeline.py` | `run_pipeline` — ETL call order, default label, `FetchError` propagation |
+| `test_alerts.py` | `merge_uv_into_daily` / `detect_alerts` — per-day UV merge, strict threshold comparison, message format, empty-input handling |
 
 ## Developer Tools
 
@@ -101,7 +109,8 @@ weather_dashboard/
 │   ├── test_db.py
 │   ├── test_load.py
 │   ├── test_query.py
-│   └── test_pipeline.py
+│   ├── test_pipeline.py
+│   └── test_alerts.py
 └── weather_dashboard/
     ├── pipeline/
     │   ├── __init__.py        # run_pipeline(lat, lon) — orchestrates ETL
@@ -110,6 +119,7 @@ weather_dashboard/
     │   └── load.py            # Upsert rows into SQLite (Load)
     ├── db.py                  # DB connection + schema init
     ├── query.py               # Read DataFrames from SQLite
+    ├── alerts.py              # Threshold-alert detection + table styling (no Streamlit/DB dependency)
     ├── utils.py               # Helper: degrees_to_compass
     └── app.py                 # Streamlit dashboard
 ```
@@ -126,3 +136,5 @@ Fetched data is saved to `data/weather.db` (SQLite, auto-created on first run) i
 | `metadata` | `key`, `value` |
 
 Re-fetching the same location upserts existing rows rather than duplicating them. Existing databases are migrated automatically to add any missing columns.
+
+`metadata` stores the last-fetched city label (`last_location`) and the saved alert threshold config (`alert_thresholds`, JSON-encoded).

@@ -2,7 +2,7 @@ import sqlite3
 from contextlib import closing
 
 from weather_dashboard.db import init_db
-from weather_dashboard.pipeline.load import upsert_weather
+from weather_dashboard.pipeline.load import upsert_weather, save_alert_thresholds
 
 
 HOURLY_ROWS = [
@@ -97,3 +97,19 @@ def test_upsert_no_location_row_without_coords(tmp_db):
     upsert_weather(HOURLY_ROWS, DAILY_ROWS, label="Berlin, Germany")
     rows = _fetch_all(tmp_db, "SELECT label FROM locations")
     assert rows == []
+
+
+def test_save_alert_thresholds_writes_metadata(tmp_db):
+    init_db()
+    save_alert_thresholds({"uv_index": 5.0, "precipitation_sum": 15.0, "temp_max": 30.0})
+    rows = _fetch_all(tmp_db, "SELECT value FROM metadata WHERE key = 'alert_thresholds'")
+    assert rows[0][0] == '{"uv_index": 5.0, "precipitation_sum": 15.0, "temp_max": 30.0}'
+
+
+def test_save_alert_thresholds_overwrites_existing(tmp_db):
+    init_db()
+    save_alert_thresholds({"uv_index": 5.0, "precipitation_sum": 15.0, "temp_max": 30.0})
+    save_alert_thresholds({"uv_index": 8.0, "precipitation_sum": 12.0, "temp_max": 40.0})
+    rows = _fetch_all(tmp_db, "SELECT value FROM metadata WHERE key = 'alert_thresholds'")
+    assert len(rows) == 1
+    assert rows[0][0] == '{"uv_index": 8.0, "precipitation_sum": 12.0, "temp_max": 40.0}'
