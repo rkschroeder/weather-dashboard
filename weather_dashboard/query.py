@@ -1,5 +1,7 @@
+import json
 from contextlib import closing
 import pandas as pd
+from weather_dashboard.alerts import DEFAULT_THRESHOLDS
 from weather_dashboard.db import connect, init_db
 
 
@@ -38,3 +40,12 @@ def load_location_history(limit: int = 10) -> list[dict]:
             (limit,),
         ).fetchall()
     return [{"label": r[0], "lat": r[1], "lon": r[2]} for r in rows]
+
+
+def load_alert_thresholds() -> dict:
+    init_db()
+    with closing(connect()) as conn:
+        row = conn.execute("SELECT value FROM metadata WHERE key = 'alert_thresholds'").fetchone()
+    if not row:
+        return DEFAULT_THRESHOLDS.copy()
+    return {**DEFAULT_THRESHOLDS, **json.loads(row[0])}

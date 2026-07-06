@@ -3,9 +3,16 @@ from contextlib import closing
 
 import pytest
 
+from weather_dashboard.alerts import DEFAULT_THRESHOLDS
 from weather_dashboard.db import init_db
-from weather_dashboard.pipeline.load import upsert_weather
-from weather_dashboard.query import load_daily, load_hourly, load_location_label, load_location_history
+from weather_dashboard.pipeline.load import upsert_weather, save_alert_thresholds
+from weather_dashboard.query import (
+    load_daily,
+    load_hourly,
+    load_location_label,
+    load_location_history,
+    load_alert_thresholds,
+)
 
 
 # Rows dated far in the future so they are always "upcoming" relative to today
@@ -100,3 +107,24 @@ def test_load_location_history_respects_limit(tmp_db):
     for i in range(5):
         upsert_weather(FUTURE_HOURLY, FUTURE_DAILY, lat=float(i), lon=float(i), label=f"City {i}")
     assert len(load_location_history(limit=3)) == 3
+
+
+def test_load_alert_thresholds_returns_defaults_when_not_set(tmp_db):
+    init_db()
+    assert load_alert_thresholds() == DEFAULT_THRESHOLDS
+
+
+def test_load_alert_thresholds_merges_partial_saved_config(tmp_db):
+    init_db()
+    save_alert_thresholds({"uv_index": 3.0})
+    thresholds = load_alert_thresholds()
+    assert thresholds["uv_index"] == 3.0
+    assert thresholds["precipitation_sum"] == DEFAULT_THRESHOLDS["precipitation_sum"]
+    assert thresholds["temp_max"] == DEFAULT_THRESHOLDS["temp_max"]
+
+
+def test_load_alert_thresholds_round_trips_full_config(tmp_db):
+    init_db()
+    custom = {"uv_index": 5.0, "precipitation_sum": 20.0, "temp_max": 30.0}
+    save_alert_thresholds(custom)
+    assert load_alert_thresholds() == custom
