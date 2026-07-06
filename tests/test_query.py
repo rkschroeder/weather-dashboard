@@ -94,7 +94,8 @@ def test_load_location_history_returns_locations(tmp_db):
     assert len(history) == 2
     assert history[0]["label"] == "Paris, France"  # most recent first
     assert history[1]["label"] == "Berlin, Germany"
-    assert {"label", "lat", "lon"} == set(history[0].keys())
+    assert history[0]["last_fetched"] == "2024-01-02 10:00:00"
+    assert {"label", "lat", "lon", "last_fetched"} == set(history[0].keys())
 
 
 def test_load_location_history_empty(tmp_db):
