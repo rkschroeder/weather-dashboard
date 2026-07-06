@@ -3,7 +3,7 @@ import pandas as pd
 import streamlit as st
 from weather_dashboard.pipeline.extract import geocode_city
 from weather_dashboard.pipeline import run_pipeline, FetchError
-from weather_dashboard.query import load_hourly, load_daily, load_location_label
+from weather_dashboard.query import load_hourly, load_daily, load_location_label, load_location_history
 from weather_dashboard.utils import degrees_to_compass
 
 st.set_page_config(
@@ -51,6 +51,20 @@ st.markdown("""
 with st.sidebar:
     st.markdown("## 📍 Location")
     st.divider()
+
+    history = load_location_history()
+    if history:
+        with st.expander("Recent Cities", expanded=True):
+            for loc in history:
+                if st.button(loc["label"], key=f"hist_{loc['label']}", use_container_width=True):
+                    with st.spinner(f"Fetching weather for {loc['label']}..."):
+                        try:
+                            run_pipeline(loc["lat"], loc["lon"], label=loc["label"])
+                        except (ValueError, FetchError) as e:
+                            st.error(str(e))
+                            st.stop()
+                    st.rerun()
+        st.divider()
 
     city = st.text_input("City name", value="Berlin", placeholder="e.g. Berlin, Tokyo, New York")
 

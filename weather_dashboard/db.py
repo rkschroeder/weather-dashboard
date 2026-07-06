@@ -14,9 +14,16 @@ def connect() -> sqlite3.Connection:
     return sqlite3.connect(DB_PATH)
 
 
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, col_type: str) -> None:
+    # ALTER TABLE has no IF NOT EXISTS; PRAGMA check prevents duplicate-column errors
+    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+
+
 def init_db() -> None:
     global _db_ready
-    if _db_ready:
+    if _db_ready:  # run at most once per process
         return
     DATA_DIR.mkdir(exist_ok=True)
     with closing(connect()) as conn:
@@ -35,17 +42,13 @@ def init_db() -> None:
                     cloud_cover REAL
                 )
             """)
-            existing = {col[1] for col in conn.execute("PRAGMA table_info(hourly)").fetchall()}
-            if "humidity" not in existing:
-                conn.execute("ALTER TABLE hourly ADD COLUMN humidity REAL")
-            if "uv_index" not in existing:
-                conn.execute("ALTER TABLE hourly ADD COLUMN uv_index REAL")
-            if "cloud_cover" not in existing:
-                conn.execute("ALTER TABLE hourly ADD COLUMN cloud_cover REAL")
-            if "apparent_temperature" not in existing:
-                conn.execute("ALTER TABLE hourly ADD COLUMN apparent_temperature REAL")
-            if "precipitation_probability" not in existing:
-                conn.execute("ALTER TABLE hourly ADD COLUMN precipitation_probability REAL")
+            # Migration guard: upgrade existing DBs that predate these columns
+            _ensure_column(conn, "hourly", "humidity", "REAL")
+            _ensure_column(conn, "hourly", "uv_index", "REAL")
+            _ensure_column(conn, "hourly", "cloud_cover", "REAL")
+            _ensure_column(conn, "hourly", "apparent_temperature", "REAL")
+            _ensure_column(conn, "hourly", "precipitation_probability", "REAL")
+
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS daily (
                     date TEXT PRIMARY KEY,
@@ -59,17 +62,25 @@ def init_db() -> None:
                     sunset TEXT
                 )
             """)
-            daily_existing = {col[1] for col in conn.execute("PRAGMA table_info(daily)").fetchall()}
-            if "sunrise" not in daily_existing:
-                conn.execute("ALTER TABLE daily ADD COLUMN sunrise TEXT")
-            if "sunset" not in daily_existing:
-                conn.execute("ALTER TABLE daily ADD COLUMN sunset TEXT")
-            if "precipitation_probability_max" not in daily_existing:
-                conn.execute("ALTER TABLE daily ADD COLUMN precipitation_probability_max REAL")
+            _ensure_column(conn, "daily", "sunrise", "TEXT")
+            _ensure_column(conn, "daily", "sunset", "TEXT")
+            _ensure_column(conn, "daily", "precipitation_probability_max", "REAL")
+
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS metadata (
                     key TEXT PRIMARY KEY,
                     value TEXT
                 )
             """)
+
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS locations (
+                    label TEXT PRIMARY KEY,
+                    lat   REAL NOT NULL,
+                    lon   REAL NOT NULL,
+                    last_fetched TEXT
+                )
+            """)
+            _ensure_column(conn, "locations", "last_fetched", "TEXT")
+
     _db_ready = True
