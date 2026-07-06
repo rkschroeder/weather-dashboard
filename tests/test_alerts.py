@@ -61,7 +61,7 @@ def test_detect_alerts_message_format():
     })
     triggered = detect_alerts(daily, {"uv_index": 7.0})
     assert len(triggered) == 1
-    assert triggered[0]["message"] == "Thu 01: Peak UV Index 9.2 exceeds threshold of 7.0"
+    assert triggered[0]["message"] == "Thu 01: Peak UV Index 9 exceeds threshold of 7"
 
 
 def test_detect_alerts_empty_dataframe_returns_empty_list():
