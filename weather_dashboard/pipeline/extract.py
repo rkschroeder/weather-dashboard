@@ -25,7 +25,11 @@ def geocode_city(city: str) -> list[dict]:
     """Return up to 15 matching locations as dicts with keys: lat, lon, label."""
     logger.debug("Geocoding city: %r", city)
     try:
-        response = requests.get(GEOCODING_URL, params={"name": city, "count": 50, "language": "en"}, timeout=10)
+        response = requests.get(
+            GEOCODING_URL,
+            params={"name": city, "count": _MAX_GEOCODE_RESULTS, "language": "en"},
+            timeout=10,
+        )
         response.raise_for_status()
     except requests.exceptions.RequestException as e:
         logger.error("Geocoding request failed for %r: %s", city, e)
