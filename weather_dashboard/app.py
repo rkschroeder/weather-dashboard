@@ -12,6 +12,7 @@ from weather_dashboard.query import (
     load_location_history,
     load_alert_thresholds,
 )
+from weather_dashboard.symbols import CONDITION_SYMBOLS, weather_symbol
 from weather_dashboard.utils import degrees_to_compass, format_relative_time
 
 st.set_page_config(
@@ -55,6 +56,17 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+
+def _fetch_and_rerun(lat: float, lon: float, label: str, spinner_text: str) -> None:
+    with st.spinner(spinner_text):
+        try:
+            run_pipeline(lat, lon, label=label)
+        except (ValueError, FetchError) as e:
+            st.error(str(e))
+            st.stop()
+    st.rerun()
+
+
 # ── Sidebar ──────────────────────────────────────────────────────────────────
 current_label = load_location_label()
 
@@ -74,13 +86,7 @@ with st.sidebar:
                     disabled=is_active,
                     type="primary" if is_active else "secondary",
                 ):
-                    with st.spinner(f"Fetching weather for {loc['label']}..."):
-                        try:
-                            run_pipeline(loc["lat"], loc["lon"], label=loc["label"])
-                        except (ValueError, FetchError) as e:
-                            st.error(str(e))
-                            st.stop()
-                    st.rerun()
+                    _fetch_and_rerun(loc["lat"], loc["lon"], loc["label"], f"Fetching weather for {loc['label']}...")
                 st.caption(f"Last fetched {format_relative_time(loc['last_fetched'])}")
         st.divider()
 
@@ -90,30 +96,26 @@ with st.sidebar:
         f"Precip > {current_thresholds['precipitation_sum']:.0f}mm · "
         f"Temp > {current_thresholds['temp_max']:.0f}°C"
     )
+    THRESHOLD_FIELDS = [
+        ("uv_index", "Peak UV Index above", "Warn when a day's peak UV index exceeds this value."),
+        ("precipitation_sum", "Precipitation (mm) above", "Warn when a day's total precipitation exceeds this many millimeters."),
+        ("temp_max", "Max Temp (°C) above", "Warn when a day's max temperature exceeds this value."),
+    ]
     with st.expander("⚠️ Alert Thresholds"):
         st.caption(threshold_summary)
         with st.form("threshold_form"):
-            uv_threshold = st.number_input(
-                "Peak UV Index above", value=float(current_thresholds["uv_index"]), min_value=0.0, step=1.0,
-                format="%.0f", help="Warn when a day's peak UV index exceeds this value.",
-            )
-            precip_threshold = st.number_input(
-                "Precipitation (mm) above", value=float(current_thresholds["precipitation_sum"]), min_value=0.0, step=1.0,
-                format="%.0f", help="Warn when a day's total precipitation exceeds this many millimeters.",
-            )
-            temp_threshold = st.number_input(
-                "Max Temp (°C) above", value=float(current_thresholds["temp_max"]), min_value=0.0, step=1.0,
-                format="%.0f", help="Warn when a day's max temperature exceeds this value.",
-            )
+            new_thresholds = {
+                key: st.number_input(
+                    label, value=float(current_thresholds[key]), min_value=0.0, step=1.0,
+                    format="%.0f", help=help_text,
+                )
+                for key, label, help_text in THRESHOLD_FIELDS
+            }
             col_save, col_reset = st.columns(2)
             save_clicked = col_save.form_submit_button("Save", use_container_width=True, type="primary")
             reset_clicked = col_reset.form_submit_button("Reset", use_container_width=True)
             if save_clicked:
-                save_alert_thresholds({
-                    "uv_index": uv_threshold,
-                    "precipitation_sum": precip_threshold,
-                    "temp_max": temp_threshold,
-                })
+                save_alert_thresholds(new_thresholds)
                 st.rerun()
             if reset_clicked:
                 save_alert_thresholds(dict(alerts.DEFAULT_THRESHOLDS))
@@ -146,13 +148,7 @@ with st.sidebar:
             selected = results[labels.index(choice)]
 
         if st.button("⬇️ Fetch Weather", use_container_width=True, type="primary"):
-            with st.spinner("Fetching weather data..."):
-                try:
-                    run_pipeline(selected["lat"], selected["lon"], label=selected["label"])
-                except (ValueError, FetchError) as e:
-                    st.error(str(e))
-                    st.stop()
-            st.rerun()
+            _fetch_and_rerun(selected["lat"], selected["lon"], selected["label"], "Fetching weather data...")
 
     st.divider()
     st.caption("Powered by [Open-Meteo](https://open-meteo.com/) · Free, no API key required")
@@ -174,37 +170,22 @@ if daily.empty:
     </div>
     """, unsafe_allow_html=True)
 
-    col1, col2, col3 = st.columns(3, gap="medium")
-    with col1:
-        st.markdown("""
-        <div class="step-card">
-            <div style="font-size: 2rem; margin-bottom: 12px;">1️⃣</div>
-            <strong>Enter a city</strong>
-            <p style="color: rgba(255,255,255,0.5); font-size: 0.9rem; margin-top: 8px;">
-                Type any city name in the sidebar on the left. The default is <em>Berlin</em>.
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
-    with col2:
-        st.markdown("""
-        <div class="step-card">
-            <div style="font-size: 2rem; margin-bottom: 12px;">2️⃣</div>
-            <strong>Search the city</strong>
-            <p style="color: rgba(255,255,255,0.5); font-size: 0.9rem; margin-top: 8px;">
-                Click <em>Search City</em>. If multiple locations match, select the correct one from the list.
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
-    with col3:
-        st.markdown("""
-        <div class="step-card">
-            <div style="font-size: 2rem; margin-bottom: 12px;">3️⃣</div>
-            <strong>Fetch the forecast</strong>
-            <p style="color: rgba(255,255,255,0.5); font-size: 0.9rem; margin-top: 8px;">
-                Click <em>Fetch Weather</em> to load the 7-day forecast. Data is saved locally for fast reloads.
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
+    STEPS = [
+        ("1️⃣", "Enter a city", "Type any city name in the sidebar on the left. The default is <em>Berlin</em>."),
+        ("2️⃣", "Search the city", "Click <em>Search City</em>. If multiple locations match, select the correct one from the list."),
+        ("3️⃣", "Fetch the forecast", "Click <em>Fetch Weather</em> to load the 7-day forecast. Data is saved locally for fast reloads."),
+    ]
+    for col, (emoji, title, text) in zip(st.columns(3, gap="medium"), STEPS):
+        with col:
+            st.markdown(f"""
+            <div class="step-card">
+                <div style="font-size: 2rem; margin-bottom: 12px;">{emoji}</div>
+                <strong>{title}</strong>
+                <p style="color: rgba(255,255,255,0.5); font-size: 0.9rem; margin-top: 8px;">
+                    {text}
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
     st.stop()
 
 location_label = load_location_label() or city
@@ -218,13 +199,7 @@ with header_col:
     st.caption(caption)
 with refresh_col:
     if current_loc and st.button("🔄 Refresh", use_container_width=True):
-        with st.spinner(f"Refreshing {location_label}..."):
-            try:
-                run_pipeline(current_loc["lat"], current_loc["lon"], label=location_label)
-            except (ValueError, FetchError) as e:
-                st.error(str(e))
-                st.stop()
-        st.rerun()
+        _fetch_and_rerun(current_loc["lat"], current_loc["lon"], location_label, f"Refreshing {location_label}...")
 st.divider()
 
 # ── Today's metrics ───────────────────────────────────────────────────────────
@@ -237,6 +212,9 @@ def _today_metric(hourly: pd.DataFrame, column: str, how: str):
     match = per_day[per_day["date"] == today["date"]]
     return match[column].iloc[0] if not match.empty else None
 
+def _fmt(value, spec: str = "{:.1f}") -> str:
+    return spec.format(value) if pd.notna(value) else "—"
+
 current_humidity = _today_metric(hourly, "humidity", "mean")
 current_uv = _today_metric(hourly, "uv_index", "max")
 current_cloud_cover = _today_metric(hourly, "cloud_cover", "mean")
@@ -248,21 +226,21 @@ st.subheader("Today at a Glance")
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("🌡️ Max Temp (°C)", f"{today['temp_max']:.1f}")
 col2.metric("❄️ Min Temp (°C)", f"{today['temp_min']:.1f}")
-col3.metric("🌡️ Apparent Temp (°C)", f"{current_apparent_temp:.1f}" if pd.notna(current_apparent_temp) else "—")
+col3.metric("🌡️ Apparent Temp (°C)", _fmt(current_apparent_temp))
 precip_prob = today["precipitation_probability_max"] if "precipitation_probability_max" in today.index else None
 col4.metric("🌂 Precip Probability (%)", f"{precip_prob:.0f}" if precip_prob is not None and pd.notna(precip_prob) else "—")
 
 # Row 2: Precipitation + wind + humidity
 col5, col6, col7, col8 = st.columns(4)
 col5.metric("🌧️ Precipitation (mm)", f"{today['precipitation_sum']:.1f}")
-col6.metric("💨 Wind Speed (km/h)", f"{today['wind_speed_max']:.1f}" if pd.notna(today["wind_speed_max"]) else "—")
+col6.metric("💨 Wind Speed (km/h)", _fmt(today["wind_speed_max"]))
 col7.metric("🧭 Wind Direction", degrees_to_compass(today["wind_direction_dominant"]) if pd.notna(today["wind_direction_dominant"]) else "—")
-col8.metric("💧 Avg Humidity (%)", f"{current_humidity:.0f}" if pd.notna(current_humidity) else "—")
+col8.metric("💧 Avg Humidity (%)", _fmt(current_humidity, "{:.0f}"))
 
 # Row 3: UV + cloud cover + sunrise/sunset
 col9, col10, col11, col12 = st.columns(4)
-col9.metric("☀️ Peak UV Index", f"{current_uv:.1f}" if pd.notna(current_uv) else "—")
-col10.metric("☁️ Avg Cloud Cover (%)", f"{current_cloud_cover:.0f}" if pd.notna(current_cloud_cover) else "—")
+col9.metric("☀️ Peak UV Index", _fmt(current_uv))
+col10.metric("☁️ Avg Cloud Cover (%)", _fmt(current_cloud_cover, "{:.0f}"))
 if "sunrise" in today.index and pd.notna(today["sunrise"]):
     col11.metric("🌅 Sunrise", today["sunrise"][11:16])
     col12.metric("🌇 Sunset", today["sunset"][11:16])
@@ -270,14 +248,6 @@ if "sunrise" in today.index and pd.notna(today["sunrise"]):
 st.divider()
 
 # ── Daily Summary table ────────────────────────────────────────────────────────
-CONDITION_SYMBOLS = [
-    ("🌧️", "Heavy rain", "Precipitation ≥ 5 mm"),
-    ("🌦️", "Light rain", "Precipitation ≥ 0.5 mm"),
-    ("☀️", "Sunny", "Cloud cover < 25% (or no data)"),
-    ("⛅", "Partly cloudy", "Cloud cover 25–59%"),
-    ("☁️", "Cloudy", "Cloud cover ≥ 60%"),
-]
-
 summary_header_col, legend_col = st.columns([5, 1])
 with summary_header_col:
     st.subheader("📋 Weekly Summary")
@@ -300,23 +270,9 @@ summary = alerts.merge_uv_into_daily(summary, hourly)
 thresholds = load_alert_thresholds()
 triggered_alerts = alerts.detect_alerts(summary, thresholds)
 
-def _weather_symbol(row):
-    # Precipitation takes priority over cloud cover — see CONDITION_SYMBOLS order.
-    precip = row["precipitation_sum"] or 0
-    cloud = row["cloud_cover"]
-    if precip >= 5:
-        return CONDITION_SYMBOLS[0][0]
-    if precip >= 0.5:
-        return CONDITION_SYMBOLS[1][0]
-    if cloud is None or pd.isna(cloud):
-        return CONDITION_SYMBOLS[2][0]
-    if cloud < 25:
-        return CONDITION_SYMBOLS[2][0]
-    if cloud < 60:
-        return CONDITION_SYMBOLS[3][0]
-    return CONDITION_SYMBOLS[4][0]
-
-summary["conditions"] = summary.apply(_weather_symbol, axis=1)
+summary["conditions"] = summary.apply(
+    lambda row: weather_symbol(row["precipitation_sum"], row["cloud_cover"]), axis=1
+)
 summary["date"] = summary["date"].dt.strftime("%a %d")
 
 display_cols = {
@@ -339,6 +295,9 @@ NUMERIC_COLUMN_HELP = {
     "Wind (km/h)": "Maximum wind speed for the day",
     "Peak UV": "Peak hourly UV index for the day",
 }
+# column_config formatting always takes precedence over the Styler applied below —
+# that's why alerts.style_exceeding only ever sets colors, and whole-number rounding
+# is done here via NumberColumn(format="%.0f") instead.
 summary_column_config = {
     "Date": st.column_config.TextColumn("Date", pinned=True),
     "Conditions": st.column_config.TextColumn("Conditions", width="small"),
@@ -371,6 +330,22 @@ st.divider()
 # ── Charts ────────────────────────────────────────────────────────────────────
 date_axis = alt.Axis(format="%a %d", tickCount="day", labelAngle=-30, title=None)
 y_axis = alt.Axis(grid=True, gridColor="rgba(255,255,255,0.08)")
+
+def _daily_line_chart(hourly, column, how, mark, y_title, tooltip_title, tooltip_format, y_domain=None, **mark_kwargs):
+    data = aggregate_hourly(hourly, column, how)
+    y_kwargs = {"scale": alt.Scale(domain=y_domain)} if y_domain else {}
+    return (
+        getattr(alt.Chart(data), mark)(**mark_kwargs)
+        .encode(
+            x=alt.X("date:T", axis=date_axis),
+            y=alt.Y(f"{column}:Q", title=y_title, axis=y_axis, **y_kwargs),
+            tooltip=[
+                alt.Tooltip("date:T", title="Date", format="%a %d"),
+                alt.Tooltip(f"{column}:Q", title=tooltip_title, format=tooltip_format),
+            ],
+        )
+        .properties(height=300)
+    )
 
 # Row A: Temperature (band + lines) | Precipitation
 col_left, col_right = st.columns(2, gap="large")
@@ -467,20 +442,7 @@ with col_right:
     st.altair_chart(precip_chart, use_container_width=True)
 
 # Row B: Wind Speed | Humidity
-wind_avg = aggregate_hourly(hourly, "wind_speed", "mean")
-wind_chart = (
-    alt.Chart(wind_avg)
-    .mark_line()
-    .encode(
-        x=alt.X("date:T", axis=date_axis),
-        y=alt.Y("wind_speed:Q", title="km/h", axis=y_axis),
-        tooltip=[
-            alt.Tooltip("date:T", title="Date", format="%a %d"),
-            alt.Tooltip("wind_speed:Q", title="Wind Speed (km/h)", format=".1f"),
-        ],
-    )
-    .properties(height=300)
-)
+wind_chart = _daily_line_chart(hourly, "wind_speed", "mean", "mark_line", "km/h", "Wind Speed (km/h)", ".1f")
 
 col_left, col_right = st.columns(2, gap="large")
 with col_left:
@@ -489,19 +451,8 @@ with col_left:
 
 with col_right:
     if "humidity" in hourly.columns:
-        humidity_avg = aggregate_hourly(hourly, "humidity", "mean")
-        humidity_chart = (
-            alt.Chart(humidity_avg)
-            .mark_line()
-            .encode(
-                x=alt.X("date:T", axis=date_axis),
-                y=alt.Y("humidity:Q", title="%", scale=alt.Scale(domain=[0, 100]), axis=y_axis),
-                tooltip=[
-                    alt.Tooltip("date:T", title="Date", format="%a %d"),
-                    alt.Tooltip("humidity:Q", title="Humidity (%)", format=".0f"),
-                ],
-            )
-            .properties(height=300)
+        humidity_chart = _daily_line_chart(
+            hourly, "humidity", "mean", "mark_line", "%", "Humidity (%)", ".0f", y_domain=[0, 100]
         )
         st.subheader("💧 Humidity Forecast (%)")
         st.altair_chart(humidity_chart, use_container_width=True)
@@ -512,38 +463,17 @@ if "uv_index" in hourly.columns or "cloud_cover" in hourly.columns:
 
     with col_left:
         if "uv_index" in hourly.columns:
-            uv_daily = aggregate_hourly(hourly, "uv_index", "max")
-            uv_chart = (
-                alt.Chart(uv_daily)
-                .mark_line()
-                .encode(
-                    x=alt.X("date:T", axis=date_axis),
-                    y=alt.Y("uv_index:Q", title="UV Index", scale=alt.Scale(domain=[0, 11]), axis=y_axis),
-                    tooltip=[
-                        alt.Tooltip("date:T", title="Date", format="%a %d"),
-                        alt.Tooltip("uv_index:Q", title="Peak UV Index", format=".1f"),
-                    ],
-                )
-                .properties(height=300)
+            uv_chart = _daily_line_chart(
+                hourly, "uv_index", "max", "mark_line", "UV Index", "Peak UV Index", ".1f", y_domain=[0, 11]
             )
             st.subheader("☀️ Peak UV Index Forecast")
             st.altair_chart(uv_chart, use_container_width=True)
 
     with col_right:
         if "cloud_cover" in hourly.columns:
-            cloud_daily = aggregate_hourly(hourly, "cloud_cover", "mean")
-            cloud_chart = (
-                alt.Chart(cloud_daily)
-                .mark_area(opacity=0.5)
-                .encode(
-                    x=alt.X("date:T", axis=date_axis),
-                    y=alt.Y("cloud_cover:Q", title="%", scale=alt.Scale(domain=[0, 100]), axis=y_axis),
-                    tooltip=[
-                        alt.Tooltip("date:T", title="Date", format="%a %d"),
-                        alt.Tooltip("cloud_cover:Q", title="Cloud Cover (%)", format=".0f"),
-                    ],
-                )
-                .properties(height=300)
+            cloud_chart = _daily_line_chart(
+                hourly, "cloud_cover", "mean", "mark_area", "%", "Cloud Cover (%)", ".0f",
+                y_domain=[0, 100], opacity=0.5,
             )
             st.subheader("☁️ Cloud Cover Forecast (%)")
             st.altair_chart(cloud_chart, use_container_width=True)
