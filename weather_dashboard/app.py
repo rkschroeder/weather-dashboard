@@ -152,7 +152,7 @@ with st.sidebar:
                 except (ValueError, FetchError) as e:
                     st.error(str(e))
                     st.stop()
-            st.success(f"Updated for {selected['label']}.")
+            st.rerun()
 
     st.divider()
     st.caption("Powered by [Open-Meteo](https://open-meteo.com/) · Free, no API key required")
