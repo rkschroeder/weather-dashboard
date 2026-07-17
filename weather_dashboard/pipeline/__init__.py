@@ -15,7 +15,14 @@ def run_pipeline(latitude: float, longitude: float, label: str = "") -> None:
 
     init_db()
     raw = fetch_weather(latitude, longitude)
-    hourly_rows, daily_rows = parse_weather(raw)
-    upsert_weather(hourly_rows, daily_rows, lat=latitude, lon=longitude, label=label)
+    hourly_rows, daily_rows, utc_offset_seconds = parse_weather(raw)
+    upsert_weather(
+        hourly_rows,
+        daily_rows,
+        lat=latitude,
+        lon=longitude,
+        label=label,
+        utc_offset_seconds=utc_offset_seconds,
+    )
 
     logger.info("Pipeline complete: %d hourly, %d daily rows upserted", len(hourly_rows), len(daily_rows))

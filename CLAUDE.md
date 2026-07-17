@@ -88,8 +88,8 @@ poetry run pytest tests/ -v
 | `tests/test_transform.py` | `parse_weather` — correct field order, empty arrays, missing key raises `ValueError` |
 | `tests/test_extract.py` | `geocode_city` / `fetch_weather` — success, fuzzy-match filter, no-results, network errors, HTTP errors |
 | `tests/test_db.py` | `init_db` — creates all 4 tables, idempotency, migration guard adds missing columns to existing DB (including `locations`) |
-| `tests/test_load.py` | `upsert_weather` — inserts rows, upsert replaces on PK conflict, label written/overwritten/skipped, location row written/skipped; `save_alert_thresholds` — writes and overwrites the `alert_thresholds` metadata row |
-| `tests/test_query.py` | `load_hourly` / `load_daily` / `load_location_label` / `load_location_history` — DataFrame columns, past-row filter, empty-table default, ordering, limit; `load_alert_thresholds` — defaults when unset, merges partial saved config, round-trips a full config |
+| `tests/test_load.py` | `upsert_weather` — inserts rows, upsert replaces on PK conflict, label written/overwritten/skipped, location row written/skipped, `location_utc_offset` written/overwritten/skipped; `save_alert_thresholds` — writes and overwrites the `alert_thresholds` metadata row |
+| `tests/test_query.py` | `load_hourly` / `load_daily` / `load_location_label` / `load_location_history` — DataFrame columns, past-row filter, empty-table default, ordering, limit; `_location_cutoff_date` — computes "today" from a location's UTC offset rather than the machine's timezone; `load_alert_thresholds` — defaults when unset, merges partial saved config, round-trips a full config |
 | `tests/test_pipeline.py` | `run_pipeline` — ETL call order and arguments, default label, `FetchError` propagation |
 | `tests/test_alerts.py` | `merge_uv_into_daily` — per-day peak UV merge, missing-column fallback; `detect_alerts` — strict `>` threshold comparison, message format, empty DataFrame |
 
@@ -117,7 +117,7 @@ User (browser / CLI)
         │
         ├── extract.py   geocode_city(city) + fetch_weather(lat, lon)  →  raw JSON
         ├── transform.py parse_weather(data)  →  (hourly_rows, daily_rows)
-        └── load.py      upsert_weather(hourly_rows, daily_rows, lat, lon, label)  →  SQLite
+        └── load.py      upsert_weather(hourly_rows, daily_rows, lat, lon, label, utc_offset_seconds)  →  SQLite
                                   │
                                   ▼
                            data/weather.db  (hourly, daily, metadata, locations)
@@ -150,7 +150,7 @@ User (browser / CLI)
 | `weather_dashboard/pipeline/__init__.py` | `run_pipeline(lat, lon, label)` — orchestrates Extract → Transform → Load |
 | `weather_dashboard/pipeline/extract.py` | Open-Meteo forecast + geocoding API calls; defines `FetchError` |
 | `weather_dashboard/pipeline/transform.py` | Parses raw API JSON into typed row tuples |
-| `weather_dashboard/pipeline/load.py` | Upserts `hourly_rows` and `daily_rows` into SQLite; writes `last_location` to metadata and city to `locations`; `save_alert_thresholds()` writes threshold config to metadata |
+| `weather_dashboard/pipeline/load.py` | Upserts `hourly_rows` and `daily_rows` into SQLite; writes `last_location` and `location_utc_offset` to metadata and city to `locations`; `save_alert_thresholds()` writes threshold config to metadata |
 | `weather_dashboard/db.py` | DB connection, schema creation, `_ensure_column` migration helper |
 | `weather_dashboard/query.py` | `load_hourly()`, `load_daily()`, `load_location_label()`, `load_location_history()`, `load_alert_thresholds()` — read-only from SQLite |
 | `weather_dashboard/alerts.py` | `merge_uv_into_daily()`, `detect_alerts()`, `style_exceeding()` — pure pandas threshold-alert logic, no Streamlit/DB dependency |
@@ -197,7 +197,7 @@ User (browser / CLI)
 | `key` | TEXT (PK) | — |
 | `value` | TEXT | — |
 
-Stores two keys: `last_location` (the display label for the last fetched city, shown in the UI header) and `alert_thresholds` (JSON-encoded dict of threshold overrides, e.g. `{"uv_index": 7.0, "precipitation_sum": 10.0, "temp_max": 35.0}` — written by `save_alert_thresholds()`, read by `load_alert_thresholds()` which merges it over `alerts.DEFAULT_THRESHOLDS`).
+Stores three keys: `last_location` (the display label for the last fetched city, shown in the UI header), `location_utc_offset` (the last fetched city's UTC offset in seconds, from the API's `utc_offset_seconds` — used by `load_hourly()`/`load_daily()` to compute "today" in that city's own timezone rather than the machine's), and `alert_thresholds` (JSON-encoded dict of threshold overrides, e.g. `{"uv_index": 7.0, "precipitation_sum": 10.0, "temp_max": 35.0}` — written by `save_alert_thresholds()`, read by `load_alert_thresholds()` which merges it over `alerts.DEFAULT_THRESHOLDS`).
 
 ### `locations` table
 
@@ -284,16 +284,16 @@ Returns a list of matching location dicts. Called in two places: the Streamlit s
 Returns the raw API JSON dict with `hourly` and `daily` keys. All error handling (network, HTTP, missing fields) raises `FetchError` or `ValueError`.
 
 ### `parse_weather(data)`
-Transforms raw API JSON into `(hourly_rows, daily_rows)` — lists of tuples ready for SQLite insertion.
+Transforms raw API JSON into `(hourly_rows, daily_rows, utc_offset_seconds)` — lists of tuples ready for SQLite insertion, plus the forecast location's UTC offset (from the API's top-level `utc_offset_seconds` field, defaulting to `0` if absent).
 
-### `upsert_weather(hourly_rows, daily_rows, lat=None, lon=None, label="")`
-Writes rows to SQLite using `INSERT OR REPLACE`. Also writes `label` to `metadata.last_location`. When `label`, `lat`, and `lon` are all provided, upserts a row into the `locations` table with the current timestamp.
+### `upsert_weather(hourly_rows, daily_rows, lat=None, lon=None, label="", utc_offset_seconds=None)`
+Writes rows to SQLite using `INSERT OR REPLACE`. Also writes `label` to `metadata.last_location` and, when provided, `utc_offset_seconds` to `metadata.location_utc_offset`. When `label`, `lat`, and `lon` are all provided, upserts a row into the `locations` table with the current timestamp.
 
 ### `init_db()`
 Creates tables and runs migration guard. Idempotent — safe to call multiple times; skips work after the first call per process via `_db_ready`.
 
 ### `load_hourly()` / `load_daily()`
-Return DataFrames filtered to rows from today onwards (`WHERE time >= date('now', 'localtime')`). Past data is retained in SQLite but not returned to the UI.
+Return DataFrames filtered to rows from today onwards in the **forecast location's own timezone** — not the machine's. The cutoff date is computed in Python from `metadata.location_utc_offset` (defaulting to UTC if unset) and bound as a query parameter, rather than relying on SQLite's `date('now', 'localtime')` (which depends on the host machine's timezone and would disagree with the location-local timestamps `extract.py` stores via `timezone=auto`). Past data is retained in SQLite but not returned to the UI.
 
 ### `load_location_label()`
 Returns the string value of `metadata.last_location`, or empty string if not set.

@@ -1,16 +1,31 @@
 import json
 from contextlib import closing
+from datetime import datetime, timedelta, timezone
+
 import pandas as pd
 from weather_dashboard.alerts import DEFAULT_THRESHOLDS
 from weather_dashboard.db import connect, init_db
 
 
+def _load_utc_offset(conn) -> int:
+    row = conn.execute("SELECT value FROM metadata WHERE key = 'location_utc_offset'").fetchone()
+    return int(row[0]) if row else 0
+
+
+def _location_cutoff_date(offset_seconds: int, now: datetime | None = None) -> str:
+    """Today's date (ISO) in the forecast location's own timezone, not the machine's."""
+    now = now or datetime.now(timezone.utc)
+    return (now + timedelta(seconds=offset_seconds)).date().isoformat()
+
+
 def load_hourly() -> pd.DataFrame:
     init_db()
     with closing(connect()) as conn:
+        cutoff = _location_cutoff_date(_load_utc_offset(conn))
         return pd.read_sql(
-            "SELECT * FROM hourly WHERE time >= date('now', 'localtime') ORDER BY time",
+            "SELECT * FROM hourly WHERE time >= ? ORDER BY time",
             conn,
+            params=(cutoff,),
             parse_dates=["time"],
         )
 
@@ -18,9 +33,11 @@ def load_hourly() -> pd.DataFrame:
 def load_daily() -> pd.DataFrame:
     init_db()
     with closing(connect()) as conn:
+        cutoff = _location_cutoff_date(_load_utc_offset(conn))
         return pd.read_sql(
-            "SELECT * FROM daily WHERE date >= date('now', 'localtime') ORDER BY date",
+            "SELECT * FROM daily WHERE date >= ? ORDER BY date",
             conn,
+            params=(cutoff,),
             parse_dates=["date"],
         )
 

@@ -99,6 +99,28 @@ def test_upsert_no_location_row_without_coords(tmp_db):
     assert rows == []
 
 
+def test_upsert_writes_utc_offset_to_metadata(tmp_db):
+    init_db()
+    upsert_weather(HOURLY_ROWS, DAILY_ROWS, utc_offset_seconds=3600)
+    rows = _fetch_all(tmp_db, "SELECT value FROM metadata WHERE key = 'location_utc_offset'")
+    assert int(rows[0][0]) == 3600
+
+
+def test_upsert_utc_offset_can_be_overwritten(tmp_db):
+    init_db()
+    upsert_weather(HOURLY_ROWS, DAILY_ROWS, utc_offset_seconds=3600)
+    upsert_weather(HOURLY_ROWS, DAILY_ROWS, utc_offset_seconds=-18000)
+    rows = _fetch_all(tmp_db, "SELECT value FROM metadata WHERE key = 'location_utc_offset'")
+    assert int(rows[0][0]) == -18000
+
+
+def test_upsert_omitted_utc_offset_leaves_metadata_untouched(tmp_db):
+    init_db()
+    upsert_weather(HOURLY_ROWS, DAILY_ROWS)
+    rows = _fetch_all(tmp_db, "SELECT value FROM metadata WHERE key = 'location_utc_offset'")
+    assert rows == []
+
+
 def test_save_alert_thresholds_writes_metadata(tmp_db):
     init_db()
     save_alert_thresholds({"uv_index": 5.0, "precipitation_sum": 15.0, "temp_max": 30.0})
