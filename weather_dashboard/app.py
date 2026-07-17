@@ -12,6 +12,7 @@ from weather_dashboard.query import (
     load_location_history,
     load_alert_thresholds,
 )
+from weather_dashboard.symbols import CONDITION_SYMBOLS, weather_symbol
 from weather_dashboard.utils import degrees_to_compass, format_relative_time
 
 st.set_page_config(
@@ -270,14 +271,6 @@ if "sunrise" in today.index and pd.notna(today["sunrise"]):
 st.divider()
 
 # ── Daily Summary table ────────────────────────────────────────────────────────
-CONDITION_SYMBOLS = [
-    ("🌧️", "Heavy rain", "Precipitation ≥ 5 mm"),
-    ("🌦️", "Light rain", "Precipitation ≥ 0.5 mm"),
-    ("☀️", "Sunny", "Cloud cover < 25% (or no data)"),
-    ("⛅", "Partly cloudy", "Cloud cover 25–59%"),
-    ("☁️", "Cloudy", "Cloud cover ≥ 60%"),
-]
-
 summary_header_col, legend_col = st.columns([5, 1])
 with summary_header_col:
     st.subheader("📋 Weekly Summary")
@@ -300,23 +293,9 @@ summary = alerts.merge_uv_into_daily(summary, hourly)
 thresholds = load_alert_thresholds()
 triggered_alerts = alerts.detect_alerts(summary, thresholds)
 
-def _weather_symbol(row):
-    # Precipitation takes priority over cloud cover — see CONDITION_SYMBOLS order.
-    precip = row["precipitation_sum"] or 0
-    cloud = row["cloud_cover"]
-    if precip >= 5:
-        return CONDITION_SYMBOLS[0][0]
-    if precip >= 0.5:
-        return CONDITION_SYMBOLS[1][0]
-    if cloud is None or pd.isna(cloud):
-        return CONDITION_SYMBOLS[2][0]
-    if cloud < 25:
-        return CONDITION_SYMBOLS[2][0]
-    if cloud < 60:
-        return CONDITION_SYMBOLS[3][0]
-    return CONDITION_SYMBOLS[4][0]
-
-summary["conditions"] = summary.apply(_weather_symbol, axis=1)
+summary["conditions"] = summary.apply(
+    lambda row: weather_symbol(row["precipitation_sum"], row["cloud_cover"]), axis=1
+)
 summary["date"] = summary["date"].dt.strftime("%a %d")
 
 display_cols = {
@@ -339,6 +318,9 @@ NUMERIC_COLUMN_HELP = {
     "Wind (km/h)": "Maximum wind speed for the day",
     "Peak UV": "Peak hourly UV index for the day",
 }
+# column_config formatting always takes precedence over the Styler applied below —
+# that's why alerts.style_exceeding only ever sets colors, and whole-number rounding
+# is done here via NumberColumn(format="%.0f") instead.
 summary_column_config = {
     "Date": st.column_config.TextColumn("Date", pinned=True),
     "Conditions": st.column_config.TextColumn("Conditions", width="small"),

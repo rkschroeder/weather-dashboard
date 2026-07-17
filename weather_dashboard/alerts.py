@@ -44,6 +44,7 @@ def detect_alerts(daily_with_uv: pd.DataFrame, thresholds: dict) -> list[dict]:
             if metric not in daily_with_uv.columns:
                 continue
             value = row[metric]
+            # Strict > , matching "exceeds" — a value exactly at the threshold does not trigger.
             if pd.isna(value) or value <= threshold:
                 continue
             label = THRESHOLD_LABELS.get(metric, metric)

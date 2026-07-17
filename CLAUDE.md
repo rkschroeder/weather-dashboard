@@ -93,6 +93,7 @@ poetry run pytest tests/ -v
 | `tests/test_pipeline.py` | `run_pipeline` — ETL call order and arguments, default label, `FetchError` propagation |
 | `tests/test_alerts.py` | `merge_uv_into_daily` — per-day peak UV merge, missing-column fallback; `detect_alerts` — strict `>` threshold comparison, message format, empty DataFrame |
 | `tests/test_aggregate.py` | `aggregate_hourly` — per-day mean/max aggregation, empty-but-correctly-shaped return for empty input or a missing column |
+| `tests/test_symbols.py` | `weather_symbol` — all 5 condition outcomes, precipitation-priority-over-cloud-cover ordering, missing/NaN cloud cover falling back to sunny |
 
 ### `tmp_db` fixture
 
@@ -156,6 +157,7 @@ User (browser / CLI)
 | `weather_dashboard/query.py` | `load_hourly()`, `load_daily()`, `load_location_label()`, `load_location_history()`, `load_alert_thresholds()` — read-only from SQLite |
 | `weather_dashboard/alerts.py` | `merge_uv_into_daily()`, `detect_alerts()`, `style_exceeding()` — pure pandas threshold-alert logic, no Streamlit/DB dependency |
 | `weather_dashboard/aggregate.py` | `aggregate_hourly(hourly, column, how)` — shared hourly→daily groupby helper, pure pandas, no Streamlit/DB dependency; used by `app.py`, `alerts.py`, and `run_pipeline.py` |
+| `weather_dashboard/symbols.py` | `weather_symbol(precipitation_sum, cloud_cover)`, `CONDITION_SYMBOLS` — pure conditions-emoji logic, no Streamlit/DB dependency; used by `app.py`'s Weekly Summary table and its info popover legend |
 | `weather_dashboard/utils.py` | `degrees_to_compass(degrees)` — converts wind degrees to compass label (e.g. `→ W`) |
 | `data/weather.db` | SQLite database (auto-created on first run) |
 
@@ -349,7 +351,7 @@ Row function passed to `pandas.Styler.apply(axis=1)` on the *rendered* Weekly Su
    - *Row 1:* Max Temp, Min Temp, Apparent Temp (daily mean from hourly), Precip Probability (from `daily.precipitation_probability_max`)
    - *Row 2:* Precipitation, Wind Speed, Wind Direction, Avg Humidity (daily mean from hourly)
    - *Row 3:* Peak UV Index (daily max from hourly), Avg Cloud Cover (daily mean from hourly), Sunrise, Sunset
-4. **Alert banner** — a single grouped `st.warning()` listing every triggered threshold alert (from `alerts.detect_alerts()`), or an `st.success()` message when none are triggered; rendered above the Weekly Summary table, next to an info popover explaining the conditions symbols (`CONDITION_SYMBOLS` in `app.py`).
+4. **Alert banner** — a single grouped `st.warning()` listing every triggered threshold alert (from `alerts.detect_alerts()`), or an `st.success()` message when none are triggered; rendered above the Weekly Summary table, next to an info popover explaining the conditions symbols (`CONDITION_SYMBOLS` in `weather_dashboard/symbols.py`).
 5. **Weekly Summary table** (`st.dataframe`) — 7-row table with Date, Conditions symbol, Max Temp, Min Temp, Precipitation, Precip Probability, Wind Speed, Peak UV; styled with a `pandas.Styler` (`alerts.style_exceeding`) that highlights cells exceeding their threshold in amber, plus `column_config` (`st.column_config.NumberColumn(..., format="%.0f")`) that **rounds every numeric column to a whole number for display** and adds a help tooltip per column; the Date column is pinned.
 6. **Forecast charts** (Altair) — three 2-column rows: Temperature + Precipitation, Wind Speed + Humidity, UV Index + Cloud Cover.
 
@@ -366,9 +368,9 @@ Thresholds default to `alerts.DEFAULT_THRESHOLDS` (UV index > 7, precipitation >
 
 Comparison is strict (`>`), matching the "exceeds" wording — a value exactly equal to its threshold does not trigger.
 
-### Weather symbol logic (`_weather_symbol(row)` in `app.py`)
+### Weather symbol logic (`weather_symbol(precipitation_sum, cloud_cover)` in `weather_dashboard/symbols.py`)
 
-Derives a conditions emoji for the Weekly Summary table from `precipitation_sum` and avg `cloud_cover` (merged from hourly via a `groupby` before rendering), pulling each symbol from the shared `CONDITION_SYMBOLS` list so the table and its info popover legend can't drift out of sync. **Precipitation takes priority over cloud cover:**
+Derives a conditions emoji for the Weekly Summary table from `precipitation_sum` and avg `cloud_cover` (merged from hourly via a `groupby` before rendering; `app.py` calls it per-row via `summary.apply(...)`). Pure function, no Streamlit/DB dependency — same reuse pattern as `alerts.py`/`aggregate.py`, and directly unit-tested in `tests/test_symbols.py`. The four thresholds (`HEAVY_RAIN_MM`, `LIGHT_RAIN_MM`, `SUNNY_MAX_CLOUD`, `PARTLY_CLOUDY_MAX_CLOUD`) are named constants that `CONDITION_SYMBOLS`' rule text is generated from, so the table, its info popover legend, and the comparison logic can't drift out of sync. **Precipitation takes priority over cloud cover:**
 
 | Symbol | Condition | Rule |
 |--------|-----------|------|
