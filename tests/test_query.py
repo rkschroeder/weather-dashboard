@@ -1,5 +1,6 @@
 import sqlite3
 from contextlib import closing
+from datetime import datetime, timezone
 
 import pytest
 
@@ -12,6 +13,7 @@ from weather_dashboard.query import (
     load_location_label,
     load_location_history,
     load_alert_thresholds,
+    _location_cutoff_date,
 )
 
 
@@ -28,6 +30,27 @@ FUTURE_DAILY = [
 # Rows dated in the past — should be excluded by the query filter
 PAST_HOURLY = [("2000-01-01T00:00", 5.0, 4.0, 0.0, 0.0, 1.0, 0.0, 60.0, 0.0, 10.0)]
 PAST_DAILY  = [("2000-01-01", 8.0, 2.0, 0.0, 0.0, 3.0, 0.0, "2000-01-01T07:00", "2000-01-01T17:00")]
+
+
+# ---------------------------------------------------------------------------
+# _location_cutoff_date
+# ---------------------------------------------------------------------------
+
+def test_location_cutoff_date_rolls_forward_for_positive_offset():
+    # Tokyo (+9h): 20:00 UTC on Jan 1 is already 05:00 local on Jan 2
+    now = datetime(2026, 1, 1, 20, 0, tzinfo=timezone.utc)
+    assert _location_cutoff_date(9 * 3600, now=now) == "2026-01-02"
+
+
+def test_location_cutoff_date_stays_back_for_negative_offset():
+    # US Pacific (-8h): 02:00 UTC on Jan 2 is still 18:00 local on Jan 1
+    now = datetime(2026, 1, 2, 2, 0, tzinfo=timezone.utc)
+    assert _location_cutoff_date(-8 * 3600, now=now) == "2026-01-01"
+
+
+def test_location_cutoff_date_defaults_to_utc_offset_zero():
+    now = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    assert _location_cutoff_date(0, now=now) == "2026-01-01"
 
 
 def test_load_hourly_returns_dataframe(tmp_db):

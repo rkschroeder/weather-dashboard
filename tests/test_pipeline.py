@@ -16,14 +16,16 @@ DAILY_ROWS  = [("2099-01-01", 15.0, 5.0, 0.5, 20.0, 10.0, 270.0, "2099-01-01T07:
 @patch("weather_dashboard.pipeline.init_db")
 def test_run_pipeline_calls_etl_in_order(mock_init, mock_fetch, mock_parse, mock_upsert):
     mock_fetch.return_value = SAMPLE_API_PAYLOAD
-    mock_parse.return_value = (HOURLY_ROWS, DAILY_ROWS)
+    mock_parse.return_value = (HOURLY_ROWS, DAILY_ROWS, 3600)
 
     run_pipeline(52.5, 13.4, label="Berlin")
 
     mock_init.assert_called_once()
     mock_fetch.assert_called_once_with(52.5, 13.4)
     mock_parse.assert_called_once_with(SAMPLE_API_PAYLOAD)
-    mock_upsert.assert_called_once_with(HOURLY_ROWS, DAILY_ROWS, lat=52.5, lon=13.4, label="Berlin")
+    mock_upsert.assert_called_once_with(
+        HOURLY_ROWS, DAILY_ROWS, lat=52.5, lon=13.4, label="Berlin", utc_offset_seconds=3600
+    )
 
 
 @patch("weather_dashboard.pipeline.upsert_weather")
@@ -32,11 +34,13 @@ def test_run_pipeline_calls_etl_in_order(mock_init, mock_fetch, mock_parse, mock
 @patch("weather_dashboard.pipeline.init_db")
 def test_run_pipeline_default_label_is_empty(mock_init, mock_fetch, mock_parse, mock_upsert):
     mock_fetch.return_value = SAMPLE_API_PAYLOAD
-    mock_parse.return_value = (HOURLY_ROWS, DAILY_ROWS)
+    mock_parse.return_value = (HOURLY_ROWS, DAILY_ROWS, 3600)
 
     run_pipeline(52.5, 13.4)
 
-    mock_upsert.assert_called_once_with(HOURLY_ROWS, DAILY_ROWS, lat=52.5, lon=13.4, label="")
+    mock_upsert.assert_called_once_with(
+        HOURLY_ROWS, DAILY_ROWS, lat=52.5, lon=13.4, label="", utc_offset_seconds=3600
+    )
 
 
 @patch("weather_dashboard.pipeline.fetch_weather")

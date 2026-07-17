@@ -1,5 +1,5 @@
-def parse_weather(data: dict) -> tuple[list[tuple], list[tuple]]:
-    """Parse raw API response into (hourly_rows, daily_rows) ready for DB upsert."""
+def parse_weather(data: dict) -> tuple[list[tuple], list[tuple], int]:
+    """Parse raw API response into (hourly_rows, daily_rows, utc_offset_seconds) ready for DB upsert."""
     try:
         hourly_rows = list(zip(
             data["hourly"]["time"],
@@ -27,4 +27,4 @@ def parse_weather(data: dict) -> tuple[list[tuple], list[tuple]]:
     except KeyError as e:
         raise ValueError(f"Unexpected weather data structure: missing field {e}") from e
 
-    return hourly_rows, daily_rows
+    return hourly_rows, daily_rows, data.get("utc_offset_seconds", 0)

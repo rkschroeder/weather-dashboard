@@ -9,6 +9,7 @@ def upsert_weather(
     lat: float | None = None,
     lon: float | None = None,
     label: str = "",
+    utc_offset_seconds: int | None = None,
 ) -> None:
     with closing(connect()) as conn:
         with conn:
@@ -24,6 +25,11 @@ def upsert_weather(
                 conn.execute(
                     "INSERT OR REPLACE INTO metadata (key, value) VALUES ('last_location', ?)",
                     (label,),
+                )
+            if utc_offset_seconds is not None:
+                conn.execute(
+                    "INSERT OR REPLACE INTO metadata (key, value) VALUES ('location_utc_offset', ?)",
+                    (utc_offset_seconds,),
                 )
             if label and lat is not None and lon is not None:
                 conn.execute(

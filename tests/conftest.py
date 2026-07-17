@@ -10,6 +10,7 @@ import weather_dashboard.db as db_module
 
 
 SAMPLE_API_PAYLOAD = {
+    "utc_offset_seconds": 3600,
     "hourly": {
         "time": ["2099-01-01T00:00", "2099-01-01T01:00"],
         "temperature_2m": [10.0, 11.0],

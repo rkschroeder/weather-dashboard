@@ -5,13 +5,13 @@ from weather_dashboard.pipeline.transform import parse_weather
 
 
 def test_parse_weather_returns_correct_row_counts():
-    hourly_rows, daily_rows = parse_weather(SAMPLE_API_PAYLOAD)
+    hourly_rows, daily_rows, _ = parse_weather(SAMPLE_API_PAYLOAD)
     assert len(hourly_rows) == 2
     assert len(daily_rows) == 2
 
 
 def test_parse_weather_hourly_field_order():
-    hourly_rows, _ = parse_weather(SAMPLE_API_PAYLOAD)
+    hourly_rows, _, _ = parse_weather(SAMPLE_API_PAYLOAD)
     row = hourly_rows[0]
     h = SAMPLE_API_PAYLOAD["hourly"]
     assert row == (
@@ -29,7 +29,7 @@ def test_parse_weather_hourly_field_order():
 
 
 def test_parse_weather_daily_field_order():
-    _, daily_rows = parse_weather(SAMPLE_API_PAYLOAD)
+    _, daily_rows, _ = parse_weather(SAMPLE_API_PAYLOAD)
     row = daily_rows[0]
     d = SAMPLE_API_PAYLOAD["daily"]
     assert row == (
@@ -51,9 +51,21 @@ def test_parse_weather_empty_arrays():
         payload["hourly"][key] = []
     for key in payload["daily"]:
         payload["daily"][key] = []
-    hourly_rows, daily_rows = parse_weather(payload)
+    hourly_rows, daily_rows, _ = parse_weather(payload)
     assert hourly_rows == []
     assert daily_rows == []
+
+
+def test_parse_weather_returns_utc_offset_seconds():
+    _, _, utc_offset_seconds = parse_weather(SAMPLE_API_PAYLOAD)
+    assert utc_offset_seconds == 3600
+
+
+def test_parse_weather_defaults_utc_offset_seconds_to_zero_when_absent():
+    payload = copy.deepcopy(SAMPLE_API_PAYLOAD)
+    del payload["utc_offset_seconds"]
+    _, _, utc_offset_seconds = parse_weather(payload)
+    assert utc_offset_seconds == 0
 
 
 def test_parse_weather_missing_hourly_key_raises():
