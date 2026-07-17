@@ -2,6 +2,7 @@ import logging
 import sys
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
+from weather_dashboard.aggregate import aggregate_hourly
 from weather_dashboard.pipeline.extract import geocode_city
 from weather_dashboard.pipeline import run_pipeline
 from weather_dashboard.query import load_daily, load_hourly
@@ -26,33 +27,18 @@ print("\n--- Daily forecast ---")
 daily = load_daily()
 hourly = load_hourly()
 
-if "humidity" in hourly.columns:
-    humidity_daily = (
-        hourly.assign(date=hourly["time"].dt.normalize())
-        .groupby("date", as_index=False)["humidity"]
-        .mean()
-        .rename(columns={"humidity": "avg_humidity"})
-    )
+humidity_daily = aggregate_hourly(hourly, "humidity", "mean").rename(columns={"humidity": "avg_humidity"})
+if not humidity_daily.empty:
     daily = daily.merge(humidity_daily, on="date", how="left")
     daily["avg_humidity"] = daily["avg_humidity"].round(0).astype("Int64")
 
-if "uv_index" in hourly.columns:
-    uv_daily = (
-        hourly.assign(date=hourly["time"].dt.normalize())
-        .groupby("date", as_index=False)["uv_index"]
-        .max()
-        .rename(columns={"uv_index": "peak_uv"})
-    )
+uv_daily = aggregate_hourly(hourly, "uv_index", "max").rename(columns={"uv_index": "peak_uv"})
+if not uv_daily.empty:
     daily = daily.merge(uv_daily, on="date", how="left")
     daily["peak_uv"] = daily["peak_uv"].round(1)
 
-if "cloud_cover" in hourly.columns:
-    cloud_cover_daily = (
-        hourly.assign(date=hourly["time"].dt.normalize())
-        .groupby("date", as_index=False)["cloud_cover"]
-        .mean()
-        .rename(columns={"cloud_cover": "avg_cloud_cover"})
-    )
+cloud_cover_daily = aggregate_hourly(hourly, "cloud_cover", "mean").rename(columns={"cloud_cover": "avg_cloud_cover"})
+if not cloud_cover_daily.empty:
     daily = daily.merge(cloud_cover_daily, on="date", how="left")
     daily["avg_cloud_cover"] = daily["avg_cloud_cover"].round(0).astype("Int64")
 
