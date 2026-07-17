@@ -1,5 +1,7 @@
 import pandas as pd
 
+from weather_dashboard.aggregate import aggregate_hourly
+
 # Pure pandas logic, no Streamlit/DB imports — safe to call from the UI, CLI, or a
 # future Airflow task (same reuse pattern as pipeline.run_pipeline).
 
@@ -26,15 +28,11 @@ DISPLAY_COLUMN_METRICS = {
 
 def merge_uv_into_daily(daily: pd.DataFrame, hourly: pd.DataFrame) -> pd.DataFrame:
     merged = daily.copy()
-    if "uv_index" in hourly.columns and not hourly.empty:
-        uv_per_day = (
-            hourly.assign(date=hourly["time"].dt.normalize())
-            .groupby("date", as_index=False)["uv_index"]
-            .max()
-        )
-        merged = merged.merge(uv_per_day, on="date", how="left")
-    else:
+    uv_per_day = aggregate_hourly(hourly, "uv_index", "max")
+    if uv_per_day.empty:
         merged["uv_index"] = None
+    else:
+        merged = merged.merge(uv_per_day, on="date", how="left")
     return merged
 
 

@@ -2,6 +2,7 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 from weather_dashboard import alerts
+from weather_dashboard.aggregate import aggregate_hourly
 from weather_dashboard.pipeline.extract import geocode_city
 from weather_dashboard.pipeline import run_pipeline, FetchError, save_alert_thresholds
 from weather_dashboard.query import (
@@ -229,30 +230,17 @@ st.divider()
 # ── Today's metrics ───────────────────────────────────────────────────────────
 today = daily.iloc[0]
 
-today_date = pd.Timestamp.now().normalize()
-current_humidity = None
-if not hourly.empty and "humidity" in hourly.columns:
-    today_hourly = hourly[hourly["time"].dt.normalize() == today_date]
-    if not today_hourly.empty:
-        current_humidity = today_hourly["humidity"].mean()
+def _today_metric(hourly: pd.DataFrame, column: str, how: str):
+    # Anchored on today["date"] (the location's own current day, per load_daily()'s
+    # offset-aware cutoff) rather than the machine's clock — see #32.
+    per_day = aggregate_hourly(hourly, column, how)
+    match = per_day[per_day["date"] == today["date"]]
+    return match[column].iloc[0] if not match.empty else None
 
-current_uv = None
-if not hourly.empty and "uv_index" in hourly.columns:
-    today_hourly_uv = hourly[hourly["time"].dt.normalize() == today_date]
-    if not today_hourly_uv.empty:
-        current_uv = today_hourly_uv["uv_index"].max()
-
-current_cloud_cover = None
-if not hourly.empty and "cloud_cover" in hourly.columns:
-    today_hourly_cc = hourly[hourly["time"].dt.normalize() == today_date]
-    if not today_hourly_cc.empty:
-        current_cloud_cover = today_hourly_cc["cloud_cover"].mean()
-
-current_apparent_temp = None
-if not hourly.empty and "apparent_temperature" in hourly.columns:
-    today_hourly_at = hourly[hourly["time"].dt.normalize() == today_date]
-    if not today_hourly_at.empty:
-        current_apparent_temp = today_hourly_at["apparent_temperature"].mean()
+current_humidity = _today_metric(hourly, "humidity", "mean")
+current_uv = _today_metric(hourly, "uv_index", "max")
+current_cloud_cover = _today_metric(hourly, "cloud_cover", "mean")
+current_apparent_temp = _today_metric(hourly, "apparent_temperature", "mean")
 
 st.subheader("Today at a Glance")
 
@@ -302,15 +290,11 @@ with legend_col:
 summary = daily.copy()
 
 # Derive per-day avg cloud cover for the weather symbol
-if "cloud_cover" in hourly.columns:
-    cloud_per_day = (
-        hourly.assign(date=hourly["time"].dt.normalize())
-        .groupby("date", as_index=False)["cloud_cover"]
-        .mean()
-    )
-    summary = summary.merge(cloud_per_day, on="date", how="left")
-else:
+cloud_per_day = aggregate_hourly(hourly, "cloud_cover", "mean")
+if cloud_per_day.empty:
     summary["cloud_cover"] = None
+else:
+    summary = summary.merge(cloud_per_day, on="date", how="left")
 
 summary = alerts.merge_uv_into_daily(summary, hourly)
 thresholds = load_alert_thresholds()
@@ -393,15 +377,11 @@ col_left, col_right = st.columns(2, gap="large")
 
 with col_left:
     # Merge apparent temperature into daily so we can use a single combined tooltip
-    if "apparent_temperature" in hourly.columns and not hourly.empty:
-        apparent_temp_daily = (
-            hourly.assign(date=hourly["time"].dt.normalize())
-            .groupby("date", as_index=False)["apparent_temperature"]
-            .mean()
-        )
-        daily_temp = daily.merge(apparent_temp_daily, on="date", how="left")
-    else:
+    apparent_temp_daily = aggregate_hourly(hourly, "apparent_temperature", "mean")
+    if apparent_temp_daily.empty:
         daily_temp = daily.copy()
+    else:
+        daily_temp = daily.merge(apparent_temp_daily, on="date", how="left")
 
     # Long format for lines + automatic color legend
     melt_vars = ["temp_max", "temp_min"] + (["apparent_temperature"] if "apparent_temperature" in daily_temp.columns else [])
@@ -487,11 +467,7 @@ with col_right:
     st.altair_chart(precip_chart, use_container_width=True)
 
 # Row B: Wind Speed | Humidity
-wind_avg = (
-    hourly.assign(date=hourly["time"].dt.normalize())
-    .groupby("date", as_index=False)["wind_speed"]
-    .mean()
-)
+wind_avg = aggregate_hourly(hourly, "wind_speed", "mean")
 wind_chart = (
     alt.Chart(wind_avg)
     .mark_line()
@@ -513,11 +489,7 @@ with col_left:
 
 with col_right:
     if "humidity" in hourly.columns:
-        humidity_avg = (
-            hourly.assign(date=hourly["time"].dt.normalize())
-            .groupby("date", as_index=False)["humidity"]
-            .mean()
-        )
+        humidity_avg = aggregate_hourly(hourly, "humidity", "mean")
         humidity_chart = (
             alt.Chart(humidity_avg)
             .mark_line()
@@ -540,11 +512,7 @@ if "uv_index" in hourly.columns or "cloud_cover" in hourly.columns:
 
     with col_left:
         if "uv_index" in hourly.columns:
-            uv_daily = (
-                hourly.assign(date=hourly["time"].dt.normalize())
-                .groupby("date", as_index=False)["uv_index"]
-                .max()
-            )
+            uv_daily = aggregate_hourly(hourly, "uv_index", "max")
             uv_chart = (
                 alt.Chart(uv_daily)
                 .mark_line()
@@ -563,11 +531,7 @@ if "uv_index" in hourly.columns or "cloud_cover" in hourly.columns:
 
     with col_right:
         if "cloud_cover" in hourly.columns:
-            cloud_daily = (
-                hourly.assign(date=hourly["time"].dt.normalize())
-                .groupby("date", as_index=False)["cloud_cover"]
-                .mean()
-            )
+            cloud_daily = aggregate_hourly(hourly, "cloud_cover", "mean")
             cloud_chart = (
                 alt.Chart(cloud_daily)
                 .mark_area(opacity=0.5)

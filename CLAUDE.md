@@ -92,6 +92,7 @@ poetry run pytest tests/ -v
 | `tests/test_query.py` | `load_hourly` / `load_daily` / `load_location_label` / `load_location_history` — DataFrame columns, past-row filter, empty-table default, ordering, limit; `_location_cutoff_date` — computes "today" from a location's UTC offset rather than the machine's timezone; `load_alert_thresholds` — defaults when unset, merges partial saved config, round-trips a full config |
 | `tests/test_pipeline.py` | `run_pipeline` — ETL call order and arguments, default label, `FetchError` propagation |
 | `tests/test_alerts.py` | `merge_uv_into_daily` — per-day peak UV merge, missing-column fallback; `detect_alerts` — strict `>` threshold comparison, message format, empty DataFrame |
+| `tests/test_aggregate.py` | `aggregate_hourly` — per-day mean/max aggregation, empty-but-correctly-shaped return for empty input or a missing column |
 
 ### `tmp_db` fixture
 
@@ -154,6 +155,7 @@ User (browser / CLI)
 | `weather_dashboard/db.py` | DB connection, schema creation, `_ensure_column` migration helper |
 | `weather_dashboard/query.py` | `load_hourly()`, `load_daily()`, `load_location_label()`, `load_location_history()`, `load_alert_thresholds()` — read-only from SQLite |
 | `weather_dashboard/alerts.py` | `merge_uv_into_daily()`, `detect_alerts()`, `style_exceeding()` — pure pandas threshold-alert logic, no Streamlit/DB dependency |
+| `weather_dashboard/aggregate.py` | `aggregate_hourly(hourly, column, how)` — shared hourly→daily groupby helper, pure pandas, no Streamlit/DB dependency; used by `app.py`, `alerts.py`, and `run_pipeline.py` |
 | `weather_dashboard/utils.py` | `degrees_to_compass(degrees)` — converts wind degrees to compass label (e.g. `→ W`) |
 | `data/weather.db` | SQLite database (auto-created on first run) |
 
@@ -311,7 +313,7 @@ Reads the `alert_thresholds` metadata row and JSON-decodes it, merging over `ale
 Writes a `{"uv_index": ..., "precipitation_sum": ..., "temp_max": ...}` dict as JSON to the `alert_thresholds` metadata row (`INSERT OR REPLACE`).
 
 ### `merge_uv_into_daily(daily, hourly)`
-Adds a `uv_index` column to a copy of the daily DataFrame — the per-day max of hourly `uv_index` (same `groupby(date).agg` pattern used elsewhere in `app.py` for `cloud_cover`). Needed because UV is only stored hourly, not in the `daily` table.
+Adds a `uv_index` column to a copy of the daily DataFrame — the per-day max of hourly `uv_index`, via the shared `aggregate.aggregate_hourly()` helper (same helper `app.py` and `run_pipeline.py` use for their own hourly→daily aggregations). Needed because UV is only stored hourly, not in the `daily` table.
 
 ### `detect_alerts(daily_with_uv, thresholds)`
 Pure function: for each day and each threshold key present in both `thresholds` and the DataFrame's columns, flags values strictly greater than (`>`) the threshold. Returns a list of `{"date", "metric", "label", "value", "threshold", "message"}` dicts — the `message` string is written to render as a `st.warning()` banner in `app.py`, and is also the reusable payload a future Airflow task would forward as an email body. No Streamlit or DB import — safe to call from a script or DAG.
