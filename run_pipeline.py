@@ -46,6 +46,16 @@ if "uv_index" in hourly.columns:
     daily = daily.merge(uv_daily, on="date", how="left")
     daily["peak_uv"] = daily["peak_uv"].round(1)
 
+if "cloud_cover" in hourly.columns:
+    cloud_cover_daily = (
+        hourly.assign(date=hourly["time"].dt.normalize())
+        .groupby("date", as_index=False)["cloud_cover"]
+        .mean()
+        .rename(columns={"cloud_cover": "avg_cloud_cover"})
+    )
+    daily = daily.merge(cloud_cover_daily, on="date", how="left")
+    daily["avg_cloud_cover"] = daily["avg_cloud_cover"].round(0).astype("Int64")
+
 if "sunrise" in daily.columns:
     daily["sunrise"] = daily["sunrise"].str[11:16]
 if "sunset" in daily.columns:
@@ -56,6 +66,8 @@ if "avg_humidity" in daily.columns:
     cols.append("avg_humidity")
 if "peak_uv" in daily.columns:
     cols.append("peak_uv")
+if "avg_cloud_cover" in daily.columns:
+    cols.append("avg_cloud_cover")
 if "sunrise" in daily.columns:
     cols.append("sunrise")
 if "sunset" in daily.columns:
